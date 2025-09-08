@@ -1,0 +1,121 @@
+# Emergent World Engine - Git ignore file
+
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+*.test
+*.out
+
+# Go workspace file
+go.work
+
+# Dependency directories (remove the comment below to include it)
+vendor/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+*.cover
+coverage.out
+coverage.html
+
+# Test artifacts
+*.test
+
+# Temporary folders
+tmp/
+temp/
+
+# Build artifacts
+dist/
+build/
+
+# Docker
+.dockerignore
+
+# Generated protobuf files (comment out if you want to commit them)
+# pkg/pb/proto/*.pb.go
+
+# Redis data files (when running locally)
+dump.rdb
+
+# Asset storage (development)
+assets/generated/
+assets/cache/
+
+# Monitoring data
+prometheus_data/
+grafana_data/
+
+# Node modules (if any frontend tooling is added)
+node_modules/
+
+# Python cache (if any Python tooling is added)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Terraform (if infrastructure as code is added)
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# Local configuration overrides
+config.local.yml
+config.local.yaml
+config.local.json
+
+# Certificate files
+*.pem
+*.key
+*.crt
+*.csr
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Archives
+*.tar.gz
+*.zip
+*.rar
+
+# Backup files
+*.bak
+*.backup
+*~
