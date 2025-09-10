@@ -10,6 +10,7 @@ type GameEvent struct {
 	Category    string   `json:"category"` // economy, security, diplomacy, environment, domestic
 	Severity    int      `json:"severity"` // 1-10
 	Options     []string `json:"options"`  // Available choices for the player
+	ImageURL    string   `json:"imageUrl,omitempty"`
 }
 
 // Advisor represents one of the 8 possible advisors
