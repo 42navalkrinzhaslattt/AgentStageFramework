@@ -70,8 +70,7 @@ func NewPresidentSim(apiKey string) (*PresidentSim, error) {
 			fw.WithPersonality(advisor.Personality),
 			fw.WithBackground(fmt.Sprintf("%s with expertise in %s", advisor.Title, advisor.Specialty)),
 		)
-		// switch dialogue model to llama 70b
-		if npc != nil { npc.Config().DialogueModel = fw.ModelLlama70B }
+		// Removed explicit llama model assignment; external Llama endpoint is used in orchestrator
 		advisorNPCs[advisor.ID] = npc
 	}
 
