@@ -129,7 +129,12 @@ func (p *PresidentSim) GenerateTurnEvent(ctx context.Context) (*GameEvent, error
 
 	// NEW: Pre-format into BREAKING NEWS style at generation time
 	title, formatted := formatBreakingNewsPost(seed.Title, seed.Topic, sev, desc)
-	return &GameEvent{ID:id, Title:title, Description:formatted, Category:seed.Topic, Severity:sev, Options: seed.Options}, nil
+	evt := &GameEvent{ID:id, Title:title, Description:formatted, Category:seed.Topic, Severity:sev, Options: seed.Options}
+
+	// Kick off async image generation with BBC-style photojournalistic prompt
+	go p.enqueueEventImage(context.Background(), evt)
+
+	return evt, nil
 }
 
 func severityLabel(s int) string { switch { case s>=8: return "high"; case s>=6: return "moderate"; default: return "low" } }
@@ -215,4 +220,29 @@ func formatBreakingNewsPost(title, category string, severity int, baseDesc strin
 	fmt.Fprintf(&b, "%s", hashtags)
 
 	return headline, strings.TrimSpace(b.String())
+}
+
+// enqueueEventImage builds a news-photo style prompt and requests an image; stores URL on the event when available
+func (p *PresidentSim) enqueueEventImage(ctx context.Context, evt *GameEvent) {
+	defer func(){ recover() }()
+	assetGen := p.engine.NewAssetGenerator(fw.WithDefaultStyle("photojournalism"))
+	prompt := buildBBCPhotoPrompt(evt)
+	img, err := assetGen.GenerateImage(ctx, &fw.ImageRequest{
+		Prompt:     prompt,
+		Width:      800,
+		Height:     450,
+		Quality:    "high",
+		Variations: 1,
+		Metadata: map[string]interface{}{"event_id": evt.ID, "category": evt.Category},
+	})
+	if err != nil { return }
+	if img != nil && img.URL != "" {
+		// attach to event
+		evt.ImageURL = img.URL
+	}
+}
+
+// buildBBCPhotoPrompt creates the requested BBC/AP style prompt with the event details
+func buildBBCPhotoPrompt(evt *GameEvent) string {
+	return fmt.Sprintf("Create a BBC-style, photojournalistic, realistic image capturing the essence of the following event:\n\nTitle: %s\nCategory: %s (Severity %d/10)\nDetails: %s\n\nStylistic Directives:\n\nSource Style: BBC News / Associated Press photojournalism.\n\nRealism: High-resolution, photorealistic. The image should look like it was taken by a professional news photographer on-site.\n\nComposition: A well-composed shot (medium or medium-wide angle) that tells a story, focusing on the human element and the context of the event. Avoid overly staged or synthetic looks.\n\nLighting: Natural and authentic lighting that fits the scene (e.g., daylight through windows for an indoor event, overcast sky for an outdoor public gathering).\n\nAtmosphere: Capture the genuine mood of the event. For a generous event, focus on expressions of gratitude, quiet dignity, and community solidarity. Avoid exaggerated emotions.\n\nCamera: Emulate a shot from a professional DSLR camera with a standard lens (e.g., 35mm or 50mm).", evt.Title, evt.Category, evt.Severity, evt.Description)
 }
