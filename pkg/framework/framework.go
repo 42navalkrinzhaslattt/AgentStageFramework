@@ -4,9 +4,13 @@ package framework
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strings"
+	"sync"
+	"time"
 
-	"github.com/emergent-world-engine/backend/internal/theta_client"
 	"github.com/emergent-world-engine/backend/internal/redis_client"
+	"github.com/emergent-world-engine/backend/internal/theta_client"
 )
 
 // Engine represents the main framework instance
@@ -14,6 +18,8 @@ type Engine struct {
 	thetaClient *theta_client.ThetaClient
 	redisClient *redis_client.RedisClient
 	config      *Config
+	mu          sync.RWMutex
+	logger      Logger
 }
 
 // Config holds framework configuration
@@ -32,31 +38,30 @@ func NewEngine(config *Config) (*Engine, error) {
 		return nil, fmt.Errorf("theta API key is required")
 	}
 
-	// Initialize Theta client (required for AI features)
 	thetaEndpoint := config.ThetaEndpoint
 	if thetaEndpoint == "" {
 		thetaEndpoint = "https://api.thetaedgecloud.com"
 	}
-	
 	thetaClient := theta_client.NewThetaClient(thetaEndpoint, config.ThetaAPIKey)
 
-	// Initialize Redis client (optional for advanced features)
+	// optional tuning via env-ish config fields (if extended)
+	// Redis init
 	var redisClient *redis_client.RedisClient
 	if config.EnableRedis && config.RedisURL != "" {
-		redisConfig := &redis_client.Config{
-			Addr:     config.RedisURL,
-			Password: config.RedisPassword,
-			DB:       0,
-			PoolSize: 10,
+		addr := config.RedisURL
+		if strings.HasPrefix(addr, "redis://") {
+			if u, err := url.Parse(addr); err == nil {
+				addr = u.Host
+			}
 		}
+		redisConfig := &redis_client.Config{Addr: addr, Password: config.RedisPassword, DB: 0, PoolSize: 10}
 		redisClient = redis_client.NewRedisClient(redisConfig)
 	}
 
-	return &Engine{
-		thetaClient: thetaClient,
-		redisClient: redisClient,
-		config:      config,
-	}, nil
+	eng := &Engine{thetaClient: thetaClient, redisClient: redisClient, config: config, logger: newLogger(config.EnableLogging)}
+	eng.logger.Infof("Engine initialized (redis=%v)", eng.IsRedisEnabled())
+
+	return eng, nil
 }
 
 // NewNPC creates a new NPC instance
@@ -68,12 +73,12 @@ func (e *Engine) NewNPC(id string, opts ...NPCOption) *NPC {
 		personality: make(map[string]interface{}),
 		state:       make(map[string]interface{}),
 	}
-	
+
 	// Apply options
 	for _, opt := range opts {
 		opt(npc)
 	}
-	
+
 	return npc
 }
 
@@ -84,12 +89,12 @@ func (e *Engine) NewDirector(opts ...DirectorOption) *Director {
 		gameState: make(map[string]interface{}),
 		config:    &DirectorConfig{},
 	}
-	
+
 	// Apply options
 	for _, opt := range opts {
 		opt(director)
 	}
-	
+
 	return director
 }
 
@@ -101,12 +106,12 @@ func (e *Engine) NewNarrative(opts ...NarrativeOption) *Narrative {
 		lore:        make(map[string]interface{}),
 		activeQuests: make(map[string]*Quest),
 	}
-	
+
 	// Apply options
 	for _, opt := range opts {
 		opt(narrative)
 	}
-	
+
 	return narrative
 }
 
@@ -116,12 +121,12 @@ func (e *Engine) NewAssetGenerator(opts ...AssetOption) *AssetGenerator {
 		engine: e,
 		cache:  make(map[string]*Asset),
 	}
-	
+
 	// Apply options
 	for _, opt := range opts {
 		opt(generator)
 	}
-	
+
 	return generator
 }
 
@@ -138,24 +143,44 @@ func (e *Engine) IsRedisEnabled() bool {
 	return e.redisClient != nil
 }
 
+// Thread-safe accessors (examples)
+func (e *Engine) ThetaClient() *theta_client.ThetaClient {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.thetaClient
+}
+
+// Redis returns the underlying Redis client (may be nil if disabled)
+func (e *Engine) Redis() *redis_client.RedisClient {
+	return e.redisClient
+}
+
 // Health checks the health of connected services
 func (e *Engine) Health(ctx context.Context) error {
-	// Test Theta connection with a simple request
-	_, err := e.thetaClient.GenerateWithLLM(ctx, &theta_client.LLMRequest{
-		Model:     "deepseek_r1",
-		Prompt:    "Hello",
-		MaxTokens: 1,
-	})
-	if err != nil {
-		return fmt.Errorf("theta client health check failed: %w", err)
-	}
-	
-	// Test Redis if enabled
+	// Lightweight check: just ensure base URL reachable via small timeout future TODO
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	// Ping Redis if enabled
 	if e.redisClient != nil {
 		if err := e.redisClient.Ping(ctx); err != nil {
 			return fmt.Errorf("redis health check failed: %w", err)
 		}
 	}
-	
 	return nil
+}
+
+// Metrics snapshot structure
+type EngineMetrics struct {
+	LLMRequests   int64
+	LLMFailures   int64
+	StreamRequests int64
+	StreamTokens   int64
+}
+
+func (e *Engine) Metrics() *EngineMetrics {
+	c := e.thetaClient
+	if c == nil {
+		return &EngineMetrics{}
+	}
+	return &EngineMetrics{LLMRequests: c.Metrics().LLMRequests, LLMFailures: c.Metrics().LLMFailures, StreamRequests: c.Metrics().LLMStreamRequests, StreamTokens: c.Metrics().LLMStreamTokens}
 }

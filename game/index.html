@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Epic Presidency: Alexandra Chen's Historic Term - Daily Prophet News</title>
+    <style>
+        /* The Daily Prophet - BBC News Style */
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Noto+Serif:ital,wght@0,400;0,600;0,700;1,400&display=swap');
+
+        :root {
+            --bbc-red: #bb1919;
+            --bbc-dark-red: #a91717;
+            --bbc-black: #222222;
+            --bbc-dark-grey: #404040;
+            --bbc-grey: #5a5a5a;
+            --bbc-light-grey: #8c8c8c;
+            --bbc-bg-grey: #f6f6f6;
+            --bbc-white: #ffffff;
+            --bbc-blue: #1461cc;
+            --bbc-border: #e6e6e6;
+            --text-primary: #222222;
+            --text-secondary: #5a5a5a;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Noto Sans', 'Helvetica Neue', Arial, sans-serif;
+            background: var(--bbc-white);
+            color: var(--text-primary);
+            line-height: 1.5;
+            font-size: 16px;
+        }
+
+        .bbc-header {
+            background: var(--bbc-red);
+            color: var(--bbc-white);
+            padding: 12px 16px;
+        }
+
+        .bbc-logo {
+            font-size: 32px;
+            font-weight: 700;
+            letter-spacing: -1px;
+        }
+
+        .bbc-nav {
+            background: var(--bbc-black);
+            padding: 0 16px;
+        }
+
+        .bbc-nav-list {
+            display: flex;
+            list-style: none;
+            gap: 32px;
+        }
+
+        .bbc-nav-item {
+            padding: 12px 0;
+            color: var(--bbc-white);
+            font-size: 14px;
+            text-decoration: none;
+            border-bottom: 4px solid transparent;
+        }
+
+        .bbc-nav-item.active {
+            border-bottom-color: var(--bbc-red);
+        }
+
+        .newspaper-container {
+            max-width: 1008px;
+            margin: 0 auto;
+            padding: 0 16px;
+        }
+
+        .bbc-breaking-alert {
+            background: var(--bbc-red);
+            color: var(--bbc-white);
+            padding: 8px 16px;
+            margin: 24px -16px 24px -16px;
+            font-size: 14px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .breaking-label {
+            background: var(--bbc-white);
+            color: var(--bbc-red);
+            padding: 2px 8px;
+            margin-right: 12px;
+            font-weight: 700;
+        }
+
+        .newspaper-title {
+            font-family: 'Noto Serif', serif;
+            font-size: 48px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin: 0 0 8px 0;
+            line-height: 1.1;
+            letter-spacing: -1px;
+        }
+
+        .newspaper-subtitle {
+            font-size: 18px;
+            color: var(--text-secondary);
+            margin: 0 0 24px 0;
+            font-weight: 400;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .bbc-article-meta {
+            border-top: 1px solid var(--bbc-border);
+            border-bottom: 1px solid var(--bbc-border);
+            padding: 16px 0;
+            margin: 32px 0;
+            font-size: 14px;
+            color: var(--text-secondary);
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .bbc-byline {
+            font-weight: 600;
+            color: var(--bbc-blue);
+        }
+
+        .bbc-article-body {
+            max-width: 640px;
+            font-family: 'Noto Serif', serif;
+            font-size: 18px;
+            line-height: 1.6;
+            color: var(--text-primary);
+        }
+
+        .bbc-article-body p {
+            margin: 0 0 24px 0;
+        }
+
+        .bbc-article-body p:first-of-type {
+            font-size: 20px;
+            font-weight: 500;
+            line-height: 1.5;
+            margin-bottom: 32px;
+        }
+
+        .bbc-article-body h3 {
+            font-size: 24px;
+            font-weight: 700;
+            margin: 32px 0 16px 0;
+            color: var(--text-primary);
+        }
+
+        .bbc-article-body h4 {
+            font-size: 20px;
+            font-weight: 600;
+            margin: 24px 0 12px 0;
+            color: var(--text-primary);
+        }
+
+        .event-media {
+            margin: 24px 0;
+            padding: 16px;
+            background: var(--bbc-bg-grey);
+            border-left: 4px solid var(--bbc-red);
+        }
+
+        .ai-generated-image {
+            width: 100%;
+            max-width: 600px;
+            height: 300px;
+            object-fit: cover;
+            border-radius: 4px;
+            margin: 12px 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border: 2px solid var(--bbc-red);
+        }
+
+        .media-placeholder {
+            background: #ddd;
+            height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 12px 0;
+            color: #666;
+            font-style: italic;
+            border-radius: 4px;
+        }
+
+        .media-caption {
+            font-size: 14px;
+            color: var(--text-secondary);
+            font-style: italic;
+            margin-top: 8px;
+            padding: 8px 12px;
+            background: rgba(187, 25, 25, 0.05);
+            border-radius: 3px;
+            border-left: 3px solid var(--bbc-red);
+        }
+
+        .video-placeholder {
+            background: #333;
+            height: 250px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 12px 0;
+            color: #fff;
+            font-style: italic;
+            border-radius: 4px;
+        }
+
+        .bbc-sidebar {
+            background: var(--bbc-bg-grey);
+            padding: 16px;
+            margin: 24px 0;
+            border-left: 4px solid var(--bbc-red);
+        }
+
+        .bbc-sidebar-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin: 0 0 12px 0;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .bbc-sidebar-content {
+            font-size: 14px;
+            line-height: 1.4;
+            color: var(--text-secondary);
+        }
+
+        .bbc-related {
+            background: var(--bbc-bg-grey);
+            padding: 24px;
+            margin: 32px -16px 0 -16px;
+        }
+
+        .bbc-related-title {
+            font-size: 20px;
+            font-weight: 700;
+            margin: 0 0 16px 0;
+        }
+
+        .bbc-related-list {
+            list-style: none;
+        }
+
+        .bbc-related-item {
+            margin: 0 0 12px 0;
+            padding: 0 0 12px 0;
+            border-bottom: 1px solid var(--bbc-border);
+        }
+
+        .bbc-related-link {
+            color: var(--bbc-blue);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 16px;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin: 16px 0;
+            padding: 16px;
+            background: var(--bbc-bg-grey);
+            border-radius: 4px;
+        }
+
+        .bbc-footer {
+            margin-top: 48px;
+        }
+
+        @media (max-width: 768px) {
+            .newspaper-title { font-size: 32px; }
+            .bbc-article-body { font-size: 16px; }
+            .newspaper-container { padding: 0 8px; }
+        }
+    </style>
+</head>
+<body>
+    <!-- BBC-style Header -->
+    <header class="bbc-header">
+        <div class="bbc-logo">DAILY PROPHET</div>
+    </header>
+
+    <!-- BBC-style Navigation -->
+    <nav class="bbc-nav">
+        <ul class="bbc-nav-list">
+            <li><a href="#" class="bbc-nav-item active">Home</a></li>
+            <li><a href="#" class="bbc-nav-item">Politics</a></li>
+            <li><a href="#" class="bbc-nav-item">Ministry</a></li>
+            <li><a href="#" class="bbc-nav-item">International</a></li>
+            <li><a href="#" class="bbc-nav-item">Quidditch</a></li>
+            <li><a href="#" class="bbc-nav-item">Weather</a></li>
+        </ul>
+    </nav>
+
+    <div class="newspaper-container">
+        <main class="bbc-main-content">
+            <!-- Breaking News Alert -->
+            <div class="bbc-breaking-alert">
+                <span class="breaking-label">BREAKING</span>
+                <span class="breaking-category">PRESIDENTIAL HISTORY</span>
+            </div>
+
+            <!-- AI Generation Notice -->
+            <div style="background: rgba(70, 130, 180, 0.1); border: 1px solid steelblue; padding: 16px; margin: 24px 0; border-radius: 6px;">
+                <div style="font-weight: 600; color: steelblue; margin-bottom: 8px;">🤖 AI-Enhanced Journalism</div>
+                <div style="font-size: 14px; line-height: 1.4;">
+                    This newspaper features images generated by <strong>Theta EdgeCloud AI</strong> based on the presidential simulation results. 
+                    Image generation requests have been submitted and are processing asynchronously. 
+                    The images below were generated using Theta EdgeCloud AI based on actual presidential events.
+                </div>
+            </div>
+
+            <!-- Main Story Header -->
+            <div class="bbc-story-header">
+                <h1 class="newspaper-title">Historic Triumph: President Alexandra Chen's Presidency Concludes with 84% Approval</h1>
+                <div class="newspaper-subtitle">8 September 2025</div>
+            </div>
+
+            <!-- BBC-style Metadata -->
+            <div class="bbc-article-meta">
+                <div class="bbc-byline">By Chief Political Correspondent Sarah Mitchell</div>
+                <div class="bbc-timestamp">8 September 2025 • 15:30</div>
+            </div>
+
+            <!-- BBC-style Article Body -->
+            <div class="bbc-article-body">
+                <p>The extraordinary success of President Alexandra Chen's presidency has concluded, leaving an indelible mark on the nation's political landscape. With a final approval rating of 84%—the highest in sixty years—this administration navigated unprecedented challenges while implementing transformative policies that reshaped multiple sectors of American governance.</p>
+
+                <h3>Five Defining Presidential Decisions</h3>
+                <p>The presidency will be remembered for five pivotal policy decisions that fundamentally altered the nation's trajectory:</p>
+
+                <h4>1. Global Climate Accord Implementation (January 2024)</h4>
+                <p><strong>Impact:</strong> Led international coalition resulting in 40% carbon reduction globally</p>
+                <p><strong>Public Response:</strong> +22% approval change</p>
+                <p>Unprecedented international cooperation on climate change, establishing the United States as the definitive leader in environmental policy.</p>
+                
+                <div class="event-media">
+                    <img src="https://ondemand-outputs.thetaedgecloud.com/srvc_ehqrh4bwf1baw73by78is9hpff8/prj_mrh3bcips5hvt7n9mduq8mt257q0/infr_rqst_stsiyke49dx3m8u8ucrutu_image_url.png" alt="President Chen signing international climate accord" class="ai-generated-image" onerror="this.src='https://via.placeholder.com/600x300/bb1919/ffffff?text=President+Chen+Climate+Accord+Signing'">
+                    <div class="media-caption">🤖 AI-generated image: Climate Accord signing ceremony (Request ID: infr_rqst_stsiyke49dx3m8u8ucrutu)</div>
+                    <div class="video-placeholder">
+                        <div style="color: white; text-align: center;">
+                            <div style="font-size: 48px; margin-bottom: 12px;">▶️</div>
+                            <div>Behind-the-scenes footage of international climate negotiations</div>
+                            <div style="font-size: 12px; opacity: 0.8; margin-top: 8px;">Video generation in progress...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <h4>2. National AI Ethics Framework (March 2024)</h4>
+                <p><strong>Impact:</strong> First comprehensive AI regulation protecting privacy and jobs</p>
+                <p><strong>Public Response:</strong> +18% approval change</p>
+                <p>Balanced innovation with worker protection, creating the global standard for AI governance.</p>
+
+                <div class="event-media">
+                    <img src="https://ondemand-outputs.thetaedgecloud.com/srvc_ehqrh4bwf1baw73by78is9hpff8/prj_mrh3bcips5hvt7n9mduq8mt257q0/infr_rqst_a7nn7np1c3smd4b2n8kmrm_image_url.png" alt="AI Ethics Framework Meeting" class="ai-generated-image" onerror="this.src='https://via.placeholder.com/600x300/1461cc/ffffff?text=AI+Ethics+Framework+Meeting'">
+                    <div class="media-caption">🤖 AI-generated image: Tech leaders and labor union meeting (Request ID: infr_rqst_a7nn7np1c3smd4b2n8kmrm)</div>
+                    <div class="video-placeholder">
+                        <div style="color: white; text-align: center;">
+                            <div style="font-size: 48px; margin-bottom: 12px;">▶️</div>
+                            <div>Presidential address on AI ethics, intercut with footage of automated factories</div>
+                            <div style="font-size: 12px; opacity: 0.8; margin-top: 8px;">Video generation in progress...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <h4>3. Universal Basic Services Program (June 2024)</h4>
+                <p><strong>Impact:</strong> Healthcare, education, and housing guaranteed for all 320 million Americans</p>
+                <p><strong>Public Response:</strong> +25% approval change</p>
+                <p>Revolutionary social safety net implementation that eliminated poverty and homelessness.</p>
+
+                <div class="event-media">
+                    <img src="https://ondemand-outputs.thetaedgecloud.com/srvc_ehqrh4bwf1baw73by78is9hpff8/prj_mrh3bcips5hvt7n9mduq8mt257q0/infr_rqst_jvre9nm3y45kqfpfkc7nhb_image_url.png" alt="Universal Basic Services Program Launch" class="ai-generated-image" onerror="this.src='https://via.placeholder.com/600x300/28a745/ffffff?text=Universal+Basic+Services+Launch'">
+                    <div class="media-caption">🤖 AI-generated image: Families receiving services under UBS program (Request ID: infr_rqst_jvre9nm3y45kqfpfkc7nhb)</div>
+                    <div class="video-placeholder">
+                        <div style="color: white; text-align: center;">
+                            <div style="font-size: 48px; margin-bottom: 12px;">▶️</div>
+                            <div>Montage of the Universal Basic Services rollout across America</div>
+                            <div style="font-size: 12px; opacity: 0.8; margin-top: 8px;">Video generation in progress...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <h4>4. Space Infrastructure Initiative (August 2024)</h4>
+                <p><strong>Impact:</strong> Established permanent lunar research station and Mars mission preparation</p>
+                <p><strong>Public Response:</strong> +15% approval change</p>
+                <p>Advanced human space exploration by decades, creating the foundation for interplanetary civilization.</p>
+
+                <div class="event-media">
+                    <img src="https://ondemand-outputs.thetaedgecloud.com/srvc_ehqrh4bwf1baw73by78is9hpff8/prj_mrh3bcips5hvt7n9mduq8mt257q0/infr_rqst_s8he2wcr3d8d1r9vrd33hy_image_url.png" alt="Lunar Research Station and Space Program" class="ai-generated-image" onerror="this.src='https://via.placeholder.com/600x300/6c757d/ffffff?text=Space+Infrastructure+Initiative'">
+                    <div class="media-caption">🤖 AI-generated image: Lunar research station and Mars mission prep (Request ID: infr_rqst_s8he2wcr3d8d1r9vrd33hy)</div>
+                    <div class="video-placeholder">
+                        <div style="color: white; text-align: center;">
+                            <div style="font-size: 48px; margin-bottom: 12px;">▶️</div>
+                            <div>Dramatic footage of lunar station establishment and Mars mission preparation</div>
+                            <div style="font-size: 12px; opacity: 0.8; margin-top: 8px;">Video generation in progress...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <h4>5. Economic Democracy Act (October 2024)</h4>
+                <p><strong>Impact:</strong> Worker ownership programs created 2 million cooperative jobs</p>
+                <p><strong>Public Response:</strong> +20% approval change</p>
+                <p>Transformed workplace democracy and wealth distribution, creating the most equitable economy in American history.</p>
+
+                <div class="event-media">
+                    <img src="https://via.placeholder.com/600x300/fd7e14/ffffff?text=Economic+Democracy+Act+Signing" alt="Economic Democracy" class="ai-generated-image">
+                    <div class="media-caption">🤖 AI-generated image: Workers celebrating cooperative ownership (Rate limit reached - pending generation)</div>
+                    <div class="video-placeholder">
+                        <div style="color: white; text-align: center;">
+                            <div style="font-size: 48px; margin-bottom: 12px;">▶️</div>
+                            <div>Documentary footage of workplace transformation and worker interviews</div>
+                            <div style="font-size: 12px; opacity: 0.8; margin-top: 8px;">Video generation in progress...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <h3>Crisis Leadership Under Pressure</h3>
+                <p>The administration faced 3 major national crises, demonstrating decisive leadership in moments of unprecedented challenge:</p>
+
+                <h4>Global Pandemic Resurgence (Critical Severity)</h4>
+                <p><strong>Presidential Response:</strong> Coordinated international vaccine development and distribution</p>
+                <p><strong>Result:</strong> Contained outbreak in 6 months, saved estimated 500,000 lives</p>
+
+                <div class="event-media">
+                    <div class="video-placeholder">
+                        [VIDEO: Real-time crisis management footage, presidential emergency briefings, international coordination calls]
+                    </div>
+                </div>
+
+                <h4>Cyber Attack on Financial Infrastructure (High Severity)</h4>
+                <p><strong>Presidential Response:</strong> Rapid deployment of quantum encryption and international cooperation</p>
+                <p><strong>Result:</strong> Systems restored in 48 hours, new cybersecurity standards adopted globally</p>
+
+                <div class="event-media">
+                    <div class="video-placeholder">
+                        [VIDEO: Cybersecurity response teams, presidential situation room during crisis, international cooperation efforts]
+                    </div>
+                </div>
+
+                <h3>Presidential Performance Metrics</h3>
+                <div class="metrics-grid">
+                    <p><strong>Economic Performance:</strong> 4.2% GDP growth, 2.1% unemployment</p>
+                    <p><strong>Legislative Success:</strong> 31 bills signed, 27 with bipartisan support</p>
+                    <p><strong>International Relations:</strong> 8 major agreements signed</p>
+                    <p><strong>Environmental Goals:</strong> 120% of climate targets achieved</p>
+                </div>
+
+                <div class="event-media">
+                    <img src="https://via.placeholder.com/600x300/17a2b8/ffffff?text=Presidential+Approval+Rating+Chart" alt="Approval Rating Trends" class="ai-generated-image">
+                    <div class="media-caption">📊 Generated infographic: Presidential approval rating progression from 52% to 84%</div>
+                </div>
+
+                <h3>AI-Powered Media Generation Status</h3>
+                <div class="bbc-sidebar">
+                    <div class="bbc-sidebar-title">Theta EdgeCloud API Integration</div>
+                    <div class="bbc-sidebar-content">
+                        <p><strong>✅ Images Requested:</strong> 4 out of 5 (rate limit reached)</p>
+                        <p><strong>🔄 Processing Status:</strong> Asynchronous generation in progress</p>
+                        <p><strong>🎯 API Endpoint:</strong> stable_diffusion_turbo_vision</p>
+                        <p><strong>📊 Request IDs Generated:</strong></p>
+                        <ul style="margin: 8px 0; padding-left: 20px; font-size: 12px; font-family: monospace;">
+                            <li>infr_rqst_stsiyke49dx3m8u8ucrutu (Climate)</li>
+                            <li>infr_rqst_a7nn7np1c3smd4b2n8kmrm (AI Ethics)</li>
+                            <li>infr_rqst_jvre9nm3y45kqfpfkc7nhb (UBS)</li>
+                            <li>infr_rqst_s8he2wcr3d8d1r9vrd33hy (Space)</li>
+                        </ul>
+                        <p><strong>Note:</strong> In production, these images would be retrieved via polling or webhooks when ready.</p>
+                    </div>
+                </div>
+
+                <h3>Historical Assessment</h3>
+                <p>A transformational presidency that fundamentally reshaped America and led global efforts on climate, technology, and social justice. President Chen successfully managed multiple crises while implementing the most progressive agenda in modern history, achieving unprecedented approval ratings through competent governance and visionary leadership.</p>
+
+                <p>As President Chen transitions from office, political analysts note this presidency's unique combination of crisis management, transformative policy implementation, and sustained public support. The administration's approach to governance, characterized by extraordinary success, has established new precedents for executive leadership in the 21st century.</p>
+
+                <p><em>This AI-enhanced coverage demonstrates the future of digital journalism, where artificial intelligence assists in creating visual narratives that complement traditional reporting. The images above were generated by Theta EdgeCloud AI based on the presidential simulation data, illustrating how technology can enhance storytelling in the digital age.</em></p>
+
+                <div class="event-media">
+                    <div class="video-placeholder">
+                        <div style="color: white; text-align: center;">
+                            <div style="font-size: 48px; margin-bottom: 12px;">🎬</div>
+                            <div>Presidential farewell address and transition ceremony</div>
+                            <div style="font-size: 14px; opacity: 0.9; margin-top: 8px;">Historical documentation of this transformational presidency</div>
+                            <div style="font-size: 12px; opacity: 0.7; margin-top: 8px;">Video generation: Pending API quota reset</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- BBC-style Sidebar for Key Points -->
+            <div class="bbc-sidebar">
+                <div class="bbc-sidebar-title">Key Facts</div>
+                <div class="bbc-sidebar-content">
+                    <p><strong>Final Approval:</strong> 84% (highest in 60 years)</p>
+                    <p><strong>Major Policies:</strong> 5 transformational decisions</p>
+                    <p><strong>Notable Achievements:</strong> 6 historic accomplishments</p>
+                    <p><strong>Crises Managed:</strong> 3 major national emergencies</p>
+                    <p><strong>Legislative Success:</strong> 87% bill passage rate</p>
+                </div>
+            </div>
+
+            <!-- BBC-style Related Stories -->
+            <div class="bbc-related">
+                <h3 class="bbc-related-title">Related Stories</h3>
+                <ul class="bbc-related-list">
+                    <li class="bbc-related-item">
+                        <a href="#" class="bbc-related-link">Presidential transition team announces key priorities for next administration</a>
+                    </li>
+                    <li class="bbc-related-item">
+                        <a href="#" class="bbc-related-link">International leaders praise Chen presidency's global leadership</a>
+                    </li>
+                    <li class="bbc-related-item">
+                        <a href="#" class="bbc-related-link">Economic analysis: How Universal Basic Services transformed America</a>
+                    </li>
+                    <li class="bbc-related-item">
+                        <a href="#" class="bbc-related-link">Lunar research station begins groundbreaking scientific missions</a>
+                    </li>
+                    <li class="bbc-related-item">
+                        <a href="#" class="bbc-related-link">Climate scientists celebrate unprecedented global cooperation success</a>
+                    </li>
+                </ul>
+            </div>
+        </main>
+    </div>
+
+    <!-- BBC-style Footer -->
+    <footer class="bbc-footer">
+        <div style="padding: 24px 16px; background: var(--bbc-black); color: var(--bbc-white); text-align: center; font-size: 14px;">
+            <p style="margin: 0;">© 2025 Daily Prophet | Ministry Affairs Department | Generated by Agent Stage Presidential Simulator</p>
+        </div>
+    </footer>
+</body>
+</html>

@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Presidential Simulator - Chat Interface</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .chat-container {
+            background: white;
+            width: 95%;
+            max-width: 900px;
+            height: 90vh;
+            border-radius: 20px;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.25);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .chat-header {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 20px 25px;
+            text-align: center;
+            position: relative;
+        }
+
+        .chat-header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .chat-header .subtitle {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .game-stats {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            font-size: 12px;
+            text-align: right;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            display: flex;
+            align-items: flex-start;
+        }
+
+        .message.user {
+            justify-content: flex-end;
+        }
+
+        .message-content {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 18px;
+            position: relative;
+            font-size: 15px;
+            line-height: 1.4;
+        }
+
+        .message.advisor .message-content {
+            background: white;
+            color: #333;
+            border: 1px solid #e1e8ed;
+            margin-left: 10px;
+        }
+
+        .message.user .message-content {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            margin-right: 10px;
+        }
+
+        .message.system .message-content {
+            background: #e8f5e8;
+            color: #2d5a2d;
+            border: 1px solid #c3e6c3;
+            max-width: 90%;
+            margin: 0 auto;
+            text-align: center;
+            font-size: 14px;
+        }
+
+        .avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: white;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+
+        .avatar.chief_of_staff { background: #e74c3c; }
+        .avatar.economic_advisor { background: #f39c12; }
+        .avatar.nat_security { background: #2ecc71; }
+        .avatar.sec_of_state { background: #3498db; }
+        .avatar.user { background: #9b59b6; }
+
+        .message-sender {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+
+        .message.user .message-sender {
+            color: rgba(255,255,255,0.8);
+            text-align: right;
+        }
+
+        .chat-input-area {
+            background: white;
+            border-top: 1px solid #e1e8ed;
+            padding: 20px;
+        }
+
+        .login-section {
+            text-align: center;
+            padding: 20px;
+        }
+
+        .login-section input, .login-section select {
+            width: 100%;
+            max-width: 300px;
+            padding: 12px;
+            margin: 8px;
+            border: 2px solid #e1e8ed;
+            border-radius: 25px;
+            font-size: 16px;
+            text-align: center;
+        }
+
+        .login-section button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 40px;
+            border-radius: 25px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 15px;
+            transition: transform 0.2s;
+        }
+
+        .login-section button:hover {
+            transform: translateY(-2px);
+        }
+
+        .input-container {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+        }
+
+        .advisor-select {
+            flex-shrink: 0;
+            padding: 10px;
+            border: 2px solid #e1e8ed;
+            border-radius: 20px;
+            background: white;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .message-input {
+            flex: 1;
+            resize: none;
+            border: 2px solid #e1e8ed;
+            border-radius: 25px;
+            padding: 12px 20px;
+            font-size: 16px;
+            font-family: inherit;
+            max-height: 100px;
+            min-height: 45px;
+        }
+
+        .send-button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            transition: transform 0.2s;
+        }
+
+        .send-button:hover:not(:disabled) {
+            transform: scale(1.05);
+        }
+
+        .send-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .typing-indicator {
+            display: none;
+            margin: 10px 0;
+            padding: 10px 15px;
+            background: white;
+            border-radius: 18px;
+            border: 1px solid #e1e8ed;
+            max-width: 70%;
+        }
+
+        .typing-dots {
+            display: flex;
+            gap: 4px;
+        }
+
+        .typing-dots span {
+            width: 8px;
+            height: 8px;
+            background: #999;
+            border-radius: 50%;
+            animation: typing 1.4s infinite;
+        }
+
+        .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes typing {
+            0%, 60%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-10px); }
+        }
+
+        .game-section {
+            display: none;
+            height: 100%;
+            flex-direction: column;
+        }
+
+        .stats-brief {
+            font-size: 11px;
+            line-height: 1.2;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <!-- Login Section -->
+        <div id="login-section" class="login-section">
+            <h1 style="color: #333; margin-bottom: 20px;">🏛️ Presidential Simulator</h1>
+            <p style="color: #666; margin-bottom: 30px;">Start your presidential term and chat with your AI advisors</p>
+            
+            <input type="text" id="president-name" placeholder="Enter your name">
+            <br>
+            <select id="party-select">
+                <option value="Democratic">Democratic Party</option>
+                <option value="Republican">Republican Party</option>
+                <option value="Independent">Independent</option>
+                <option value="Progressive">Progressive Party</option>
+            </select>
+            <br>
+            <select id="difficulty-select">
+                <option value="easy">Easy Mode</option>
+                <option value="medium">Medium Mode</option>
+                <option value="hard">Hard Mode</option>
+            </select>
+            <br>
+            <button onclick="startGame()">Start Presidency</button>
+        </div>
+
+        <!-- Game Section -->
+        <div id="game-section" class="game-section">
+            <div class="chat-header">
+                <h1>Oval Office Communications</h1>
+                <div class="subtitle">Presidential Advisory Chat System</div>
+                <div class="game-stats" id="header-stats">
+                    <div class="stats-brief">Loading...</div>
+                </div>
+            </div>
+
+            <div class="chat-messages" id="chat-messages">
+                <div class="message system">
+                    <div class="message-content">
+                        🎉 Welcome to the Oval Office! Your presidential advisors are ready to assist you. Select an advisor and start chatting to get guidance on running the country.
+                    </div>
+                </div>
+            </div>
+
+            <div class="typing-indicator" id="typing-indicator">
+                <div class="typing-dots">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+            </div>
+
+            <div class="chat-input-area">
+                <div class="input-container">
+                    <select id="advisor-select" class="advisor-select">
+                        <option value="chief_of_staff">👔 Chief of Staff</option>
+                        <option value="economic_advisor">💰 Economic Advisor</option>
+                        <option value="nat_security">🛡️ National Security</option>
+                        <option value="sec_of_state">🌍 Secretary of State</option>
+                    </select>
+                    <textarea 
+                        id="message-input" 
+                        class="message-input" 
+                        placeholder="Type your message to the advisor..."
+                        rows="1"
+                    ></textarea>
+                    <button onclick="sendMessage()" id="send-button" class="send-button">➤</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let gameSessionId = null;
+        let gameSocket = null;
+        let currentGameState = null;
+
+        const advisorNames = {
+            'chief_of_staff': 'Sarah Mitchell (Chief of Staff)',
+            'economic_advisor': 'Dr. Elena Rodriguez (Economic Advisor)', 
+            'nat_security': 'General Marcus Thompson (National Security)',
+            'sec_of_state': 'Ambassador James Wright (Secretary of State)'
+        };
+
+        async function startGame() {
+            const name = document.getElementById('president-name').value || 'President Player';
+            const party = document.getElementById('party-select').value;
+            const difficulty = document.getElementById('difficulty-select').value;
+
+            try {
+                const response = await fetch('/api/game/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, party, difficulty })
+                });
+
+                const data = await response.json();
+                gameSessionId = data.sessionId;
+                currentGameState = data.gameState;
+
+                document.getElementById('login-section').style.display = 'none';
+                document.getElementById('game-section').style.display = 'flex';
+
+                updateHeaderStats();
+                connectWebSocket();
+
+                // Add welcome message
+                addSystemMessage(`Welcome President ${name}! You are now in office representing the ${party}. Your advisors are ready to help you lead the nation.`);
+
+            } catch (error) {
+                console.error('Failed to start game:', error);
+                alert('Failed to start game. Please try again.');
+            }
+        }
+
+        async function sendMessage() {
+            const messageInput = document.getElementById('message-input');
+            const advisorSelect = document.getElementById('advisor-select');
+            const sendButton = document.getElementById('send-button');
+            
+            const message = messageInput.value.trim();
+            const advisorId = advisorSelect.value;
+            
+            if (!message) return;
+
+            // Add user message to chat
+            addMessage('user', 'You', message);
+            
+            // Clear input and show typing
+            messageInput.value = '';
+            sendButton.disabled = true;
+            showTypingIndicator();
+
+            try {
+                const response = await fetch(`/api/game/${gameSessionId}/advisor/${advisorId}/ask`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: message })
+                });
+
+                const data = await response.json();
+                
+                hideTypingIndicator();
+                
+                // Add advisor response
+                addMessage('advisor', advisorNames[advisorId], data.message.content, advisorId);
+                
+            } catch (error) {
+                console.error('Failed to get advisor response:', error);
+                hideTypingIndicator();
+                addSystemMessage('Sorry, there was an error getting a response from your advisor. Please try again.');
+            }
+
+            sendButton.disabled = false;
+        }
+
+        function addMessage(type, sender, content, advisorId = null) {
+            const messagesContainer = document.getElementById('chat-messages');
+            
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            
+            let avatarHtml = '';
+            if (type === 'advisor') {
+                avatarHtml = `<div class="avatar ${advisorId}">${advisorId.charAt(0).toUpperCase()}</div>`;
+            } else if (type === 'user') {
+                avatarHtml = `<div class="avatar user">You</div>`;
+            }
+            
+            const senderHtml = type !== 'system' ? `<div class="message-sender">${sender}</div>` : '';
+            
+            messageDiv.innerHTML = `
+                ${type === 'advisor' ? avatarHtml : ''}
+                <div class="message-content">
+                    ${senderHtml}
+                    ${content}
+                </div>
+                ${type === 'user' ? avatarHtml : ''}
+            `;
+            
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        function addSystemMessage(content) {
+            addMessage('system', '', content);
+        }
+
+        function showTypingIndicator() {
+            document.getElementById('typing-indicator').style.display = 'block';
+            const messagesContainer = document.getElementById('chat-messages');
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        function hideTypingIndicator() {
+            document.getElementById('typing-indicator').style.display = 'none';
+        }
+
+        function updateHeaderStats() {
+            if (!currentGameState) return;
+            
+            const statsDiv = document.getElementById('header-stats');
+            statsDiv.innerHTML = `
+                <div class="stats-brief">
+                    Turn ${currentGameState.turn}/${currentGameState.maxTurns} | 
+                    Approval: ${currentGameState.stats.popularApproval}%<br>
+                    Economy: ${currentGameState.stats.economy} | 
+                    Security: ${currentGameState.stats.security}
+                </div>
+            `;
+        }
+
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/${gameSessionId}`;
+            
+            gameSocket = new WebSocket(wsUrl);
+            
+            gameSocket.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                console.log('WebSocket message:', data);
+                
+                if (data.type === 'game_state_update') {
+                    currentGameState = data.data;
+                    updateHeaderStats();
+                }
+            };
+
+            gameSocket.onerror = function(error) {
+                console.error('WebSocket error:', error);
+            };
+        }
+
+        // Auto-resize textarea and handle Enter key
+        document.addEventListener('DOMContentLoaded', function() {
+            const messageInput = document.getElementById('message-input');
+            
+            messageInput.addEventListener('input', function() {
+                this.style.height = 'auto';
+                this.style.height = Math.min(this.scrollHeight, 100) + 'px';
+            });
+            
+            messageInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            });
+        });
+    </script>
+</body>
+</html>

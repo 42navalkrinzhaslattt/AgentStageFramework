@@ -2,7 +2,10 @@ package framework
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/emergent-world-engine/backend/internal/theta_client"
@@ -15,6 +18,7 @@ type Narrative struct {
 	lore         map[string]interface{}
 	activeQuests map[string]*Quest
 	config       *NarrativeConfig
+	mu           sync.RWMutex
 }
 
 // NarrativeConfig holds narrative system configuration
@@ -131,7 +135,7 @@ func (n *Narrative) GenerateQuest(ctx context.Context, playerContext *GameContex
 	prompt := n.buildQuestGenerationPrompt(playerContext)
 	
 	// Get story model (default to DeepSeek R1 for complex narrative generation)
-	model := "deepseek_r1"
+	model := ModelStoryDefault
 	if n.config != nil && n.config.StoryModel != "" {
 		model = n.config.StoryModel
 	}
@@ -140,7 +144,7 @@ func (n *Narrative) GenerateQuest(ctx context.Context, playerContext *GameContex
 	llmReq := &theta_client.LLMRequest{
 		Model:       model,
 		Prompt:      prompt,
-		MaxTokens:   400,
+		MaxTokens:   DefaultStoryMaxTokens,
 		Temperature: 0.8,
 	}
 	
@@ -153,13 +157,8 @@ func (n *Narrative) GenerateQuest(ctx context.Context, playerContext *GameContex
 		return nil, fmt.Errorf("no quest generated")
 	}
 	
-	questContent := llmResp.Choices[0].Text
-	
-	// Parse and structure the quest
-	quest := n.parseGeneratedQuest(questContent, playerContext)
-	
-	// Add to active quests
-	n.activeQuests[quest.ID] = quest
+	quest := n.parseGeneratedQuest(llmResp.Choices[0].Text, playerContext)
+	n.mu.Lock(); n.activeQuests[quest.ID] = quest; n.mu.Unlock()
 	
 	// Store in Redis if available
 	if n.engine.IsRedisEnabled() {
@@ -282,9 +281,7 @@ func (n *Narrative) TrackPlayerChoice(playerID string, choice *Choice) error {
 }
 
 // GetActiveQuests returns all active quests
-func (n *Narrative) GetActiveQuests() map[string]*Quest {
-	return n.activeQuests
-}
+func (n *Narrative) GetActiveQuests() map[string]*Quest { n.mu.RLock(); defer n.mu.RUnlock(); cp := make(map[string]*Quest, len(n.activeQuests)); for k,v := range n.activeQuests { cp[k]=v }; return cp }
 
 // UpdateQuestProgress updates the progress of a quest objective
 func (n *Narrative) UpdateQuestProgress(questID, objectiveID string, progress int) error {
@@ -391,37 +388,37 @@ func (n *Narrative) buildStoryEventPrompt(eventContext *EventContext) string {
 }
 
 func (n *Narrative) parseGeneratedQuest(questContent string, playerContext *GameContext) *Quest {
-	// Simple parsing - could be enhanced with more sophisticated NLP
 	questID := fmt.Sprintf("quest_%d", time.Now().Unix())
-	
-	// Create basic quest structure
-	quest := &Quest{
-		ID:          questID,
-		Title:       "Generated Quest",
-		Description: questContent,
-		Status:      "available",
-		Type:        "side",
-		Difficulty:  5, // Medium difficulty
-		EstimatedTime: 30 * time.Minute,
-		Location:    playerContext.Location,
-		CreatedAt:   time.Now(),
-		Objectives: []Objective{
-			{
-				ID:          fmt.Sprintf("%s_obj_1", questID),
-				Description: "Complete the quest objective",
-				Type:        "general",
-				Current:     0,
-				Required:    1,
-				Completed:   false,
-			},
-		},
-		Rewards: map[string]interface{}{
-			"experience": 100,
-			"gold":       50,
-		},
-		Metadata: make(map[string]interface{}),
+	var parsed struct {
+		Title       string                 `json:"title"`
+		Description string                 `json:"description"`
+		Objectives  []struct { ID string `json:"id"`; Description string `json:"description"` } `json:"objectives"`
+		Rewards     map[string]interface{} `json:"rewards"`
 	}
-	
+	clean := strings.TrimSpace(questContent)
+	start := strings.Index(clean, "{")
+	end := strings.LastIndex(clean, "}")
+	usedJSON := false
+	if start >= 0 && end > start {
+		fragment := clean[start : end+1]
+		if json.Unmarshal([]byte(fragment), &parsed) == nil { usedJSON = true }
+	}
+	quest := &Quest{ID: questID, Title: "Quest Directive", Description: questContent, Status: "available", Type: "side", Difficulty: 5, EstimatedTime: 30 * time.Minute, Location: playerContext.Location, CreatedAt: time.Now(), Objectives: []Objective{{ID: fmt.Sprintf("%s_obj_1", questID), Description: "Complete the quest objective", Type: "general", Current: 0, Required: 1}}, Rewards: map[string]interface{}{"experience": 100, "gold": 50}, Metadata: make(map[string]interface{})}
+	if usedJSON {
+		if parsed.Title != "" { quest.Title = parsed.Title }
+		if parsed.Description != "" { quest.Description = parsed.Description }
+		if len(parsed.Objectives) > 0 {
+			objs := make([]Objective, 0, len(parsed.Objectives))
+			for i, o := range parsed.Objectives {
+				id := o.ID
+				if id == "" { id = fmt.Sprintf("%s_obj_%d", questID, i+1) }
+				objs = append(objs, Objective{ID: id, Description: o.Description, Type: "general", Required: 1})
+			}
+			quest.Objectives = objs
+		}
+		for k, v := range parsed.Rewards { quest.Rewards[k] = v }
+		quest.Metadata["structured"] = true
+	} else { quest.Metadata["structured"] = false }
 	return quest
 }
 

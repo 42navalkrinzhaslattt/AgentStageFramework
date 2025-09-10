@@ -2,7 +2,10 @@ package framework
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/emergent-world-engine/backend/internal/theta_client"
@@ -10,9 +13,11 @@ import (
 
 // AssetGenerator handles AI-powered asset generation
 type AssetGenerator struct {
-	engine *Engine
-	cache  map[string]*Asset
-	config *AssetConfig
+	engine   *Engine
+	cache    map[string]*Asset
+	config   *AssetConfig
+	mu       sync.RWMutex
+	maxCache int
 }
 
 // AssetConfig holds asset generation configuration
@@ -231,7 +236,7 @@ func (ag *AssetGenerator) GenerateImage(ctx context.Context, req *ImageRequest) 
 	if ag.config != nil && ag.config.CacheEnabled {
 		expiration := time.Now().Add(ag.config.CacheDuration)
 		asset.ExpiresAt = &expiration
-		ag.cache[ag.getCacheKey(req.Prompt, "image")] = asset
+		ag.mu.Lock(); if ag.cache == nil { ag.cache = make(map[string]*Asset) }; ag.cache[ag.getCacheKey(req.Prompt, "image")] = asset; ag.enforceCacheLimitLocked(); ag.mu.Unlock()
 	}
 	
 	return asset, nil
@@ -323,7 +328,7 @@ func (ag *AssetGenerator) GenerateVideo(ctx context.Context, req *VideoRequest) 
 	if ag.config != nil && ag.config.CacheEnabled {
 		expiration := time.Now().Add(ag.config.CacheDuration)
 		asset.ExpiresAt = &expiration
-		ag.cache[ag.getCacheKey(req.Prompt, "video")] = asset
+		ag.mu.Lock(); if ag.cache == nil { ag.cache = make(map[string]*Asset) }; ag.cache[ag.getCacheKey(req.Prompt, "video")] = asset; ag.enforceCacheLimitLocked(); ag.mu.Unlock()
 	}
 	
 	return asset, nil
@@ -396,7 +401,7 @@ func (ag *AssetGenerator) GenerateTexture(ctx context.Context, req *TextureReque
 	if ag.config != nil && ag.config.CacheEnabled {
 		expiration := time.Now().Add(ag.config.CacheDuration)
 		asset.ExpiresAt = &expiration
-		ag.cache[ag.getCacheKey(cacheKey, "texture")] = asset
+		ag.mu.Lock(); if ag.cache == nil { ag.cache = make(map[string]*Asset) }; ag.cache[ag.getCacheKey(cacheKey, "texture")] = asset; ag.enforceCacheLimitLocked(); ag.mu.Unlock()
 	}
 	
 	return asset, nil
@@ -464,7 +469,7 @@ func (ag *AssetGenerator) GenerateConceptArt(ctx context.Context, req *ConceptAr
 	if ag.config != nil && ag.config.CacheEnabled {
 		expiration := time.Now().Add(ag.config.CacheDuration)
 		asset.ExpiresAt = &expiration
-		ag.cache[ag.getCacheKey(cacheKey, "concept")] = asset
+		ag.mu.Lock(); if ag.cache == nil { ag.cache = make(map[string]*Asset) }; ag.cache[ag.getCacheKey(cacheKey, "concept")] = asset; ag.enforceCacheLimitLocked(); ag.mu.Unlock()
 	}
 	
 	return asset, nil
@@ -498,6 +503,7 @@ func (ag *AssetGenerator) GetAsset(assetID string) (*Asset, bool) {
 
 // ListAssets returns all cached assets
 func (ag *AssetGenerator) ListAssets() []*Asset {
+	ag.mu.Lock(); defer ag.mu.Unlock()
 	assets := make([]*Asset, 0, len(ag.cache))
 	now := time.Now()
 	
@@ -514,8 +520,15 @@ func (ag *AssetGenerator) ListAssets() []*Asset {
 }
 
 // ClearCache removes all cached assets
-func (ag *AssetGenerator) ClearCache() {
-	ag.cache = make(map[string]*Asset)
+func (ag *AssetGenerator) ClearCache() { ag.mu.Lock(); ag.cache = make(map[string]*Asset); ag.mu.Unlock() }
+
+func (ag *AssetGenerator) enforceCacheLimitLocked() {
+	if ag.maxCache == 0 { ag.maxCache = DefaultAssetCacheMax }
+	if len(ag.cache) <= ag.maxCache { return }
+	// naive eviction: remove oldest by GeneratedAt
+	var oldestKey string; var oldestTime time.Time
+	for k,a := range ag.cache { if oldestTime.IsZero() || a.GeneratedAt.Before(oldestTime) { oldestTime = a.GeneratedAt; oldestKey = k } }
+	if oldestKey != "" { delete(ag.cache, oldestKey) }
 }
 
 // Helper methods
@@ -589,15 +602,16 @@ func (ag *AssetGenerator) getQualityLevel() string {
 }
 
 func (ag *AssetGenerator) getCacheKey(prompt, assetType string) string {
-	return fmt.Sprintf("%s_%s", assetType, prompt)
+	h := sha1.Sum([]byte(assetType + "|" + prompt))
+	return hex.EncodeToString(h[:])
 }
 
 func (ag *AssetGenerator) getCachedAsset(prompt, assetType string) *Asset {
+	ag.mu.RLock(); defer ag.mu.RUnlock()
 	key := ag.getCacheKey(prompt, assetType)
 	if asset, exists := ag.cache[key]; exists {
-		// Check expiration
 		if asset.ExpiresAt != nil && time.Now().After(*asset.ExpiresAt) {
-			delete(ag.cache, key)
+			go func(k string){ ag.mu.Lock(); delete(ag.cache, k); ag.mu.Unlock() }(key)
 			return nil
 		}
 		return asset
