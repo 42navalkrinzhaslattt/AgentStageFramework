@@ -3,6 +3,8 @@ package framework
 import (
 	"context"
 	"fmt"
+	"sort"
+	"sync"
 	"time"
 
 	"github.com/emergent-world-engine/backend/internal/theta_client"
@@ -16,6 +18,7 @@ type NPC struct {
 	personality map[string]interface{}
 	state       map[string]interface{}
 	config      *NPCConfig
+	mu          sync.RWMutex
 }
 
 // NPCConfig holds NPC-specific configuration
@@ -132,52 +135,82 @@ type GameContext struct {
 func (npc *NPC) GenerateDialogue(ctx context.Context, req *DialogueRequest) (*DialogueResponse, error) {
 	// Build context-aware prompt
 	prompt := npc.buildDialoguePrompt(req)
-	
-	// Get dialogue model (default to DeepSeek R1 for dialogue)
-	model := "deepseek_r1"
-	if npc.config != nil && npc.config.DialogueModel != "" {
-		model = npc.config.DialogueModel
-	}
-	
-	// Generate dialogue using LLM
-	llmReq := &theta_client.LLMRequest{
-		Model:       model,
-		Prompt:      prompt,
-		MaxTokens:   150,
-		Temperature: 0.8,
-	}
-	
+	model := ModelDialogueDefault
+	if npc.config != nil && npc.config.DialogueModel != "" { model = npc.config.DialogueModel }
+	llmReq := &theta_client.LLMRequest{ Model: model, Prompt: prompt, MaxTokens: DefaultDialogueMaxTokens, Temperature: 0.8 }
+	if model == "deepseek-chat" { llmReq.ResponseFormat = map[string]string{"type":"json_object"} }
 	llmResp, err := npc.engine.thetaClient.GenerateWithLLM(ctx, llmReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate dialogue: %w", err)
-	}
-	
-	if len(llmResp.Choices) == 0 {
-		return nil, fmt.Errorf("no dialogue generated")
-	}
-	
+	if err != nil { return nil, fmt.Errorf("failed to generate dialogue: %w", err) }
+	if len(llmResp.Choices) == 0 { return nil, fmt.Errorf("no dialogue generated") }
 	dialogue := llmResp.Choices[0].Text
-	
-	// Create response
-	response := &DialogueResponse{
-		Message: dialogue,
-		Emotion: "neutral", // Could be enhanced with emotion detection
-	}
-	
+	response := &DialogueResponse{ Message: dialogue, Emotion: "neutral" }
 	// Generate voice if enabled
 	if npc.config != nil && npc.config.EnableVoice {
-		audioData, err := npc.generateVoice(ctx, dialogue)
-		if err == nil {
+		if npc.config.VoiceModel == "" {
+			npc.config.VoiceModel = ModelVoiceDefault
+		}
+		if audioData, err := npc.generateVoice(ctx, dialogue); err == nil {
 			response.AudioData = audioData
 		}
 	}
-	
 	// Store in memory if Redis is available
 	if npc.engine.IsRedisEnabled() {
 		npc.addToMemory(req.PlayerMessage, dialogue)
 	}
-	
 	return response, nil
+}
+
+// GenerateDialogueStream streams dialogue chunks via callback. Returns final aggregated response.
+func (npc *NPC) GenerateDialogueStream(ctx context.Context, req *DialogueRequest, onChunk func(string)) (*DialogueResponse, error) {
+	prompt := npc.buildDialoguePrompt(req)
+	model := ModelDialogueDefault
+	if npc.config != nil && npc.config.DialogueModel != "" {
+		model = npc.config.DialogueModel
+	}
+	llmReq := &theta_client.LLMRequest{
+		Model:       model,
+		Prompt:      prompt,
+		Stream:      true,
+		MaxTokens:   DefaultDialogueMaxTokens,
+		Temperature: 0.8,
+	}
+	ch, errCh := npc.engine.thetaClient.GenerateWithLLMStream(ctx, llmReq)
+	var full string
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case err := <-errCh:
+			if err != nil {
+				return nil, err
+			}
+			// channel closed cleanly
+			resp := &DialogueResponse{
+				Message: full,
+				Emotion: "neutral",
+			}
+			if npc.config != nil && npc.config.EnableVoice && full != "" {
+				if audio, e := npc.generateVoice(context.Background(), full); e == nil {
+					resp.AudioData = audio
+				}
+			}
+			if npc.engine.IsRedisEnabled() && req.PlayerMessage != "" && full != "" {
+				npc.addToMemory(req.PlayerMessage, full)
+			}
+			return resp, nil
+		case tok, ok := <-ch:
+			if !ok {
+				continue
+			}
+			if tok == "" {
+				continue
+			}
+			full += tok
+			if onChunk != nil {
+				onChunk(tok)
+			}
+		}
+	}
 }
 
 // Perceive analyzes the visual environment using AI vision
@@ -185,17 +218,17 @@ func (npc *NPC) Perceive(ctx context.Context, imageData []byte, query string) (*
 	if npc.config == nil || !npc.config.EnableVision {
 		return nil, fmt.Errorf("vision not enabled for this NPC")
 	}
-	
+
 	visionReq := &theta_client.VisionRequest{
 		Image: imageData,
 		Query: query,
 	}
-	
+
 	visionResp, err := npc.engine.thetaClient.AnalyzeVision(ctx, visionReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to analyze vision: %w", err)
 	}
-	
+
 	// Convert detections to our format
 	perceptions := make([]Perception, len(visionResp.Detections))
 	for i, detection := range visionResp.Detections {
@@ -205,7 +238,7 @@ func (npc *NPC) Perceive(ctx context.Context, imageData []byte, query string) (*
 			Location:   fmt.Sprintf("x:%f y:%f", detection.BoundingBox.X, detection.BoundingBox.Y),
 		}
 	}
-	
+
 	return &PerceptionResult{
 		Description: visionResp.Description,
 		Objects:     perceptions,
@@ -214,9 +247,8 @@ func (npc *NPC) Perceive(ctx context.Context, imageData []byte, query string) (*
 
 // UpdateMemory adds new information to the NPC's memory
 func (npc *NPC) UpdateMemory(key string, value interface{}) {
+	npc.mu.Lock(); defer npc.mu.Unlock()
 	npc.memory[key] = value
-	
-	// Also store in Redis if available for persistence
 	if npc.engine.IsRedisEnabled() {
 		memoryKey := fmt.Sprintf("npc:%s:memory:%s", npc.id, key)
 		npc.engine.redisClient.Set(context.Background(), memoryKey, value, 24*time.Hour)
@@ -225,33 +257,24 @@ func (npc *NPC) UpdateMemory(key string, value interface{}) {
 
 // GetMemory retrieves information from the NPC's memory
 func (npc *NPC) GetMemory(key string) (interface{}, bool) {
-	// Check local memory first
-	if value, exists := npc.memory[key]; exists {
-		return value, true
-	}
-	
-	// Check Redis if available
+	npc.mu.RLock(); v, ok := npc.memory[key]; npc.mu.RUnlock()
+	if ok { return v, true }
 	if npc.engine.IsRedisEnabled() {
 		memoryKey := fmt.Sprintf("npc:%s:memory:%s", npc.id, key)
 		var value interface{}
 		if err := npc.engine.redisClient.Get(context.Background(), memoryKey, &value); err == nil {
-			npc.memory[key] = value // Cache locally
+			npc.mu.Lock(); npc.memory[key] = value; npc.mu.Unlock()
 			return value, true
 		}
 	}
-	
 	return nil, false
 }
 
 // GetState returns the current state of the NPC
-func (npc *NPC) GetState() map[string]interface{} {
-	return npc.state
-}
+func (npc *NPC) GetState() map[string]interface{} { npc.mu.RLock(); defer npc.mu.RUnlock(); cp := make(map[string]interface{}, len(npc.state)); for k,v := range npc.state { cp[k]=v }; return cp }
 
 // SetState updates the NPC's state
-func (npc *NPC) SetState(key string, value interface{}) {
-	npc.state[key] = value
-}
+func (npc *NPC) SetState(key string, value interface{}) { npc.mu.Lock(); npc.state[key] = value; npc.mu.Unlock() }
 
 // PerceptionResult contains the results of environmental perception
 type PerceptionResult struct {
@@ -269,7 +292,7 @@ type Perception struct {
 // buildDialoguePrompt creates a context-aware prompt for dialogue generation
 func (npc *NPC) buildDialoguePrompt(req *DialogueRequest) string {
 	prompt := fmt.Sprintf("You are %s.", npc.id)
-	
+
 	if npc.config != nil {
 		if npc.config.Personality != "" {
 			prompt += fmt.Sprintf(" Your personality: %s.", npc.config.Personality)
@@ -278,7 +301,7 @@ func (npc *NPC) buildDialoguePrompt(req *DialogueRequest) string {
 			prompt += fmt.Sprintf(" Your background: %s.", npc.config.Background)
 		}
 	}
-	
+
 	if req.Context != nil {
 		if req.Context.Location != "" {
 			prompt += fmt.Sprintf(" You are currently in %s.", req.Context.Location)
@@ -290,7 +313,7 @@ func (npc *NPC) buildDialoguePrompt(req *DialogueRequest) string {
 			prompt += fmt.Sprintf(" The environment: %s.", req.Context.Environment)
 		}
 	}
-	
+
 	// Add recent dialogue history
 	if len(req.History) > 0 {
 		prompt += " Recent conversation:"
@@ -298,9 +321,9 @@ func (npc *NPC) buildDialoguePrompt(req *DialogueRequest) string {
 			prompt += fmt.Sprintf(" %s: %s", entry.Speaker, entry.Message)
 		}
 	}
-	
+
 	prompt += fmt.Sprintf(" Player says: \"%s\" Respond naturally as the character:", req.PlayerMessage)
-	
+
 	return prompt
 }
 
@@ -309,36 +332,45 @@ func (npc *NPC) generateVoice(ctx context.Context, text string) ([]byte, error) 
 	if npc.config == nil || npc.config.VoiceModel == "" {
 		return nil, fmt.Errorf("voice model not configured")
 	}
-	
+
 	ttsReq := &theta_client.TTSRequest{
 		Text:  text,
 		Voice: npc.config.VoiceModel,
 	}
-	
+
 	ttsResp, err := npc.engine.thetaClient.GenerateVoice(ctx, ttsReq)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return ttsResp.AudioData, nil
 }
 
 // addToMemory stores dialogue in memory (local and Redis if available)
 func (npc *NPC) addToMemory(playerMessage, npcResponse string) {
-	timestamp := time.Now()
-	
-	// Store in local memory
-	memoryKey := fmt.Sprintf("dialogue_%d", timestamp.Unix())
-	npc.memory[memoryKey] = DialogueEntry{
-		Speaker:   "player",
-		Message:   playerMessage,
-		Timestamp: timestamp,
+	if playerMessage == "" && npcResponse == "" { return }
+	timestamp := time.Now().Unix()
+	npc.mu.Lock()
+	// enforce memory limit exactly after inserts
+	entries := []struct{ k string; ts int64 }{}
+	for k,val := range npc.memory { if de, ok := val.(DialogueEntry); ok { entries = append(entries, struct{ k string; ts int64 }{k, de.Timestamp.Unix()}) } }
+	// insert new
+	npc.memory[fmt.Sprintf("dialogue_%d", timestamp)] = DialogueEntry{Speaker: "player", Message: playerMessage, Timestamp: time.Unix(timestamp,0)}
+	npc.memory[fmt.Sprintf("response_%d", timestamp)] = DialogueEntry{Speaker: npc.id, Message: npcResponse, Timestamp: time.Unix(timestamp,0)}
+	if len(npc.memory) > DefaultMaxNPCMemory {
+		// remove oldest until within limit
+		keys := make([]string,0,len(npc.memory))
+		for k := range npc.memory { keys = append(keys,k) }
+		sort.Strings(keys) // chronological because key embeds unix ts
+		for len(npc.memory) > DefaultMaxNPCMemory { delete(npc.memory, keys[0]); keys = keys[1:] }
 	}
-	
-	responseKey := fmt.Sprintf("response_%d", timestamp.Unix())
-	npc.memory[responseKey] = DialogueEntry{
-		Speaker:   npc.id,
-		Message:   npcResponse,
-		Timestamp: timestamp,
+	npc.mu.Unlock()
+}
+
+// Config returns the NPC's configuration, creating it if necessary
+func (npc *NPC) Config() *NPCConfig {
+	if npc.config == nil {
+		npc.config = &NPCConfig{}
 	}
+	return npc.config
 }

@@ -3,6 +3,7 @@ package framework
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/emergent-world-engine/backend/internal/theta_client"
@@ -13,6 +14,7 @@ type Director struct {
 	engine    *Engine
 	gameState map[string]interface{}
 	config    *DirectorConfig
+	mu        sync.RWMutex
 }
 
 // DirectorConfig holds director-specific configuration
@@ -100,36 +102,33 @@ type DirectorAction struct {
 func (d *Director) ProcessEvent(ctx context.Context, event *GameEvent) (*DirectorDecision, error) {
 	// Build context-aware prompt for strategic reasoning
 	prompt := d.buildEventAnalysisPrompt(event)
-	
+
 	// Get reasoning model (default to DeepSeek R1 for strategic decisions)
-	model := "deepseek_r1"
+	model := ModelReasoningDefault
 	if d.config != nil && d.config.ReasoningModel != "" {
 		model = d.config.ReasoningModel
 	}
-	
+
 	// Generate strategic response using LLM
 	llmReq := &theta_client.LLMRequest{
 		Model:       model,
 		Prompt:      prompt,
-		MaxTokens:   300,
+		MaxTokens:   DefaultReasoningMaxTokens,
 		Temperature: 0.6, // Lower temperature for more consistent strategic decisions
 	}
-	
+
 	llmResp, err := d.engine.thetaClient.GenerateWithLLM(ctx, llmReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process event: %w", err)
 	}
-	
+
 	if len(llmResp.Choices) == 0 {
 		return nil, fmt.Errorf("no decision generated")
 	}
-	
-	reasoning := llmResp.Choices[0].Text
-	
-	// Create decision
+
 	decision := &DirectorDecision{
 		Decision:   "analyze_and_respond",
-		Reasoning:  reasoning,
+		Reasoning:  llmResp.Choices[0].Text,
 		Actions:    d.generateActions(event),
 		Confidence: 0.8,
 		Priority:   d.calculatePriority(event),
@@ -139,10 +138,10 @@ func (d *Director) ProcessEvent(ctx context.Context, event *GameEvent) (*Directo
 			"timestamp":  event.Timestamp,
 		},
 	}
-	
+
 	// Store decision for future reference
 	d.storeDecision(event, decision)
-	
+
 	return decision, nil
 }
 
@@ -151,31 +150,31 @@ func (d *Director) AnalyzePlayerBehavior(ctx context.Context, playerID string, e
 	if d.config == nil || !d.config.PlayerAnalysis {
 		return nil, fmt.Errorf("player analysis not enabled")
 	}
-	
+
 	// Build analysis prompt
 	prompt := d.buildPlayerAnalysisPrompt(playerID, events)
-	
+
 	model := "deepseek_r1"
 	if d.config.ReasoningModel != "" {
 		model = d.config.ReasoningModel
 	}
-	
+
 	llmReq := &theta_client.LLMRequest{
 		Model:       model,
 		Prompt:      prompt,
 		MaxTokens:   400,
 		Temperature: 0.7,
 	}
-	
+
 	llmResp, err := d.engine.thetaClient.GenerateWithLLM(ctx, llmReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to analyze player behavior: %w", err)
 	}
-	
+
 	if len(llmResp.Choices) == 0 {
 		return nil, fmt.Errorf("no analysis generated")
 	}
-	
+
 	return &PlayerAnalysis{
 		PlayerID:      playerID,
 		Analysis:      llmResp.Choices[0].Text,
@@ -191,31 +190,31 @@ func (d *Director) GenerateEvent(ctx context.Context, context *GameContext) (*Ge
 	if d.config == nil || !d.config.EventGeneration {
 		return nil, fmt.Errorf("event generation not enabled")
 	}
-	
+
 	// Build event generation prompt
 	prompt := d.buildEventGenerationPrompt(context)
-	
+
 	model := "deepseek_r1"
 	if d.config.ReasoningModel != "" {
 		model = d.config.ReasoningModel
 	}
-	
+
 	llmReq := &theta_client.LLMRequest{
 		Model:       model,
 		Prompt:      prompt,
 		MaxTokens:   250,
 		Temperature: 0.9, // Higher temperature for creative event generation
 	}
-	
+
 	llmResp, err := d.engine.thetaClient.GenerateWithLLM(ctx, llmReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate event: %w", err)
 	}
-	
+
 	if len(llmResp.Choices) == 0 {
 		return nil, fmt.Errorf("no event generated")
 	}
-	
+
 	return &GeneratedEvent{
 		Type:        "dynamic",
 		Title:       "AI Generated Event",
@@ -232,16 +231,16 @@ func (d *Director) AdjustDifficulty(ctx context.Context, playerStats *PlayerStat
 	if d.config == nil || !d.config.DifficultyScaling {
 		return nil, fmt.Errorf("difficulty scaling not enabled")
 	}
-	
+
 	// Calculate current difficulty metrics
 	successRate := float64(playerStats.SuccessfulActions) / float64(playerStats.TotalActions)
 	avgCompletionTime := playerStats.AvgCompletionTime
 	deathRate := float64(playerStats.Deaths) / float64(playerStats.Sessions)
-	
+
 	// Determine adjustment
 	var adjustment float64
 	var reasoning string
-	
+
 	switch {
 	case successRate > 0.85 && deathRate < 0.1:
 		adjustment = 0.15 // Increase difficulty
@@ -256,7 +255,7 @@ func (d *Director) AdjustDifficulty(ctx context.Context, playerStats *PlayerStat
 		adjustment = 0.0
 		reasoning = "Player performance within target range, no adjustment needed"
 	}
-	
+
 	return &DifficultyAdjustment{
 		PlayerID:      playerStats.PlayerID,
 		Adjustment:    adjustment,
@@ -272,15 +271,10 @@ func (d *Director) AdjustDifficulty(ctx context.Context, playerStats *PlayerStat
 }
 
 // UpdateGameState updates the director's understanding of the game world
-func (d *Director) UpdateGameState(key string, value interface{}) {
-	d.gameState[key] = value
-}
+func (d *Director) UpdateGameState(key string, value interface{}) { d.mu.Lock(); d.gameState[key] = value; d.mu.Unlock() }
 
 // GetGameState retrieves current game state information
-func (d *Director) GetGameState(key string) (interface{}, bool) {
-	value, exists := d.gameState[key]
-	return value, exists
-}
+func (d *Director) GetGameState(key string) (interface{}, bool) { d.mu.RLock(); v, ok := d.gameState[key]; d.mu.RUnlock(); return v, ok }
 
 // PlayerAnalysis contains insights about player behavior
 type PlayerAnalysis struct {
@@ -333,28 +327,32 @@ func (d *Director) buildEventAnalysisPrompt(event *GameEvent) string {
 	prompt += fmt.Sprintf("Event Type: %s\n", event.Type)
 	prompt += fmt.Sprintf("Player Action: %s\n", event.Action)
 	prompt += fmt.Sprintf("Location: %s\n", event.Location)
-	
+
 	if d.config != nil && d.config.StrategicFocus != "" {
 		prompt += fmt.Sprintf("Strategic Focus: %s\n", d.config.StrategicFocus)
 	}
-	
-	prompt += "Provide strategic analysis and recommend actions to enhance the player experience:"
-	
+
+	prompt += "Provide strategic analysis and recommend actions to enhance the player experience.\n"
+	prompt += "After analysis, output a single JSON object ONLY on the final line with integer deltas -10..10 for metrics: economy, security, diplomacy, environment, approval, stability.\n"
+	prompt += "Set at least 3 non-zero metrics, considering realistic cross-domain spillover effects (e.g., security actions affect stability and diplomacy; environmental actions affect approval and economy).\n"
+	prompt += "Format: {\"metrics\":{\"economy\":E,\"security\":S,\"diplomacy\":D,\"environment\":Env,\"approval\":A,\"stability\":St}}\n"
+	prompt += "If uncertain set a field to 0. Do not wrap in markdown or add commentary after JSON."
+
 	return prompt
 }
 
 func (d *Director) buildPlayerAnalysisPrompt(playerID string, events []GameEvent) string {
 	prompt := fmt.Sprintf("Analyze player %s's behavior based on recent actions:\n", playerID)
-	
+
 	for i, event := range events {
 		if i >= 10 { // Limit to last 10 events
 			break
 		}
 		prompt += fmt.Sprintf("- %s: %s at %s\n", event.Type, event.Action, event.Location)
 	}
-	
+
 	prompt += "Identify the player's style, preferences, and suggest how to improve their experience:"
-	
+
 	return prompt
 }
 
@@ -362,13 +360,13 @@ func (d *Director) buildEventGenerationPrompt(context *GameContext) string {
 	prompt := "Generate an interesting game event based on current context:\n"
 	prompt += fmt.Sprintf("Location: %s\n", context.Location)
 	prompt += fmt.Sprintf("Time: %s\n", context.TimeOfDay)
-	
+
 	if context.Weather != "" {
 		prompt += fmt.Sprintf("Weather: %s\n", context.Weather)
 	}
-	
+
 	prompt += "Create an engaging event that would enhance the player's experience:"
-	
+
 	return prompt
 }
 
@@ -383,7 +381,7 @@ func (d *Director) generateActions(event *GameEvent) []DirectorAction {
 			},
 		},
 	}
-	
+
 	// Add context-specific actions based on event type
 	switch event.Type {
 	case "player_death":
@@ -406,7 +404,7 @@ func (d *Director) generateActions(event *GameEvent) []DirectorAction {
 			},
 		})
 	}
-	
+
 	return actions
 }
 
@@ -436,7 +434,7 @@ func (d *Director) extractPlayStyle(events []GameEvent) string {
 	for _, event := range events {
 		actionCounts[event.Action]++
 	}
-	
+
 	// Determine dominant play style
 	if actionCounts["combat"] > len(events)/2 {
 		return "aggressive"
@@ -445,30 +443,37 @@ func (d *Director) extractPlayStyle(events []GameEvent) string {
 	} else if actionCounts["craft"] > len(events)/3 {
 		return "builder"
 	}
-	
+
 	return "balanced"
 }
 
 func (d *Director) generateRecommendations(events []GameEvent) []string {
 	recommendations := []string{}
-	
+
 	// Basic recommendations based on event patterns
 	actionCounts := make(map[string]int)
 	for _, event := range events {
 		actionCounts[event.Action]++
 	}
-	
+
 	if actionCounts["combat"] == 0 {
 		recommendations = append(recommendations, "Introduce combat tutorial or easier enemies")
 	}
-	
+
 	if actionCounts["explore"] > int(float64(len(events))*0.8) {
 		recommendations = append(recommendations, "Add hidden areas or exploration rewards")
 	}
-	
+
 	if len(recommendations) == 0 {
 		recommendations = append(recommendations, "Continue current game balance")
 	}
-	
+
 	return recommendations
+}
+
+func snippet(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }

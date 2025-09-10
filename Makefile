@@ -95,3 +95,49 @@ help:
 	@echo "Utility targets:"
 	@echo "  clean          - Clean build artifacts"
 	@echo "  help           - Show this help message"
+
+# Presidential Simulator (game submodule)
+GAME_DIR=game
+GAME_BIN=$(BINARY_DIR)/presidential-sim
+ENV_FILE?=.env
+
+# Load .env (export lines) if present
+ifneq (,$(wildcard $(ENV_FILE)))
+include $(ENV_FILE)
+export $(shell sed -n 's/^[A-Za-z_][A-Za-z0-9_]*=//p' $(ENV_FILE) >/dev/null 2>&1)
+endif
+
+.PHONY: game-build
+game-build:
+	@echo "Building Presidential Simulator..."
+	@mkdir -p $(BINARY_DIR)
+	cd $(GAME_DIR) && go build $(LDFLAGS) -o ../$(GAME_BIN) .
+
+.PHONY: game-run
+game-run: game-build
+	@echo "Running Presidential Simulator (terminal mode)..."
+	./$(GAME_BIN)
+
+.PHONY: game-run-web
+game-run-web: game-build
+	@echo "Running Presidential Simulator (web mode on PORT=$(PORT))..."
+	@PORT?=8080
+	THETA_API_KEY=$${THETA_API_KEY} ./$(GAME_BIN) web $${PORT}
+
+.PHONY: game-dev
+game-dev:
+	@echo "Running Presidential Simulator live (go run) with auto .env load..."
+	cd $(GAME_DIR) && go run . web $${PORT:-8080}
+
+.PHONY: game-clean
+game-clean:
+	rm -f $(GAME_BIN)
+
+# Update help
+help: ## show help
+	@echo "Game targets:"; \
+	echo "  game-build     - Build presidential simulator binary"; \
+	echo "  game-run       - Run in terminal mode"; \
+	echo "  game-run-web   - Run web server (PORT env)"; \
+	echo "  game-dev       - Run via go run with live changes"; \
+	echo "  game-clean     - Remove built binary";
