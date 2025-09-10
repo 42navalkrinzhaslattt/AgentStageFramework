@@ -137,17 +137,29 @@ const formatTime = (timestamp) => {
   });
 };
 
-const Message = ({ message, isSystem = false, time }) => {
+const Message = ({ message, isSystem = false, time, name, title, titleColor, profilePicture }) => {
   const avatarData = getSystemAvatar(isSystem);
   const timestamp = time || Date.now();
   const isPlayer = !isSystem;
+  
+  const displayName = name || avatarData.name;
+  const displayTitle = title;
+  const displayTitleColor = titleColor || "#8b98a5";
+  const avatarContent = profilePicture || avatarData.icon;
+  const avatarColor = avatarData.color;
+  const nameColor = avatarData.nameColor;
 
   return (
     <MessageWrapper isPlayer={isPlayer}>
-      <Avatar color={avatarData.color}>{avatarData.icon}</Avatar>
+      <Avatar color={avatarColor}>{avatarContent}</Avatar>
       <MessageContainer isPlayer={isPlayer}>
         <MessageHeader>
-          <Username color={avatarData.nameColor}>{avatarData.name}</Username>
+          <Username color={nameColor}>{displayName}</Username>
+          {displayTitle && (
+            <span style={{ color: displayTitleColor, fontSize: '12px', marginLeft: '8px' }}>
+              {displayTitle}
+            </span>
+          )}
         </MessageHeader>
         <MessageText>
           <ReactMarkdown>{message}</ReactMarkdown>
