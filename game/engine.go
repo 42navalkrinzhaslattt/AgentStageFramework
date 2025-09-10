@@ -9,6 +9,7 @@ import (
 	"time"
 
 	fw "github.com/emergent-world-engine/backend/pkg/framework"
+	imgc "presidential-simulator/internal/ondemand_image_client"
 )
 
 // PresidentSim encapsulates the turn-based chat game simulation
@@ -25,7 +26,7 @@ func NewPresidentSim(apiKey string) (*PresidentSim, error) {
 	if apiKey == "" {
 		apiKey = getenvFirst([]string{"THETA_API_KEY", "THETA_KEY"})
 	}
-	eng, err := fw.NewEngine(&fw.Config{ThetaAPIKey: apiKey, EnableLogging: true})
+	eng, err := fw.NewEngine(&fw.Config{ThetaAPIKey: apiKey, EnableLogging: true, ThetaEndpoint: getenv("THETA_BASE_URL")})
 	if err != nil {
 		return nil, err
 	}
@@ -204,20 +205,13 @@ func formatBreakingNewsPost(title, category string, severity int, baseDesc strin
 		rumor = "border agents cite policy whiplash and gaps"
 	}
 
-	// Hashtags
-	tag := func(s string) string { return "#" + strings.ReplaceAll(strings.Title(strings.ReplaceAll(s, "_", " ")), " ", "") }
-	cats := []string{"Breaking", strings.ToLower(category), "Crisis", "WhiteHouse"}
-	for i, c := range cats { cats[i] = tag(c) }
-	hashtags := strings.Join(cats, " ")
-
 	var b strings.Builder
-	fmt.Fprintf(&b, "🧭 **What’s Happening:** %s (severity %d/10).\n\n", baseDesc, severity)
-	fmt.Fprintf(&b, "🌐 **On The Ground:** %s\n\n", onGround)
-	fmt.Fprintf(&b, "🏢 **Named Entity:** %s is central to unfolding operations.\n\n", entity)
-	fmt.Fprintf(&b, "🗣️ **Official vs Rumors:** %s, but %s.\n\n", official, rumor)
-	b.WriteString("🏛️ **Politics:** The White House is in crisis mode; opponents blame the administration for unforced errors. All eyes are on the President to act next.\n\n")
-	b.WriteString("``\n\n") // single-line image placeholder
-	fmt.Fprintf(&b, "%s", hashtags)
+	fmt.Fprintf(&b, "🧭 What’s Happening: %s (severity %d/10).\n\n", baseDesc, severity)
+	fmt.Fprintf(&b, "🌐 On The Ground: %s\n\n", onGround)
+	fmt.Fprintf(&b, "🏢 Named Entity: %s is central to unfolding operations.\n\n", entity)
+	fmt.Fprintf(&b, "🗣️ Official vs Rumors: %s, but %s.\n\n", official, rumor)
+	b.WriteString("🏛️ Politics: The White House is in crisis mode; opponents blame the administration for unforced errors. All eyes are on the President to act next.\n\n")
+	// Removed image placeholder and hashtags
 
 	return headline, strings.TrimSpace(b.String())
 }
@@ -225,21 +219,15 @@ func formatBreakingNewsPost(title, category string, severity int, baseDesc strin
 // enqueueEventImage builds a news-photo style prompt and requests an image; stores URL on the event when available
 func (p *PresidentSim) enqueueEventImage(ctx context.Context, evt *GameEvent) {
 	defer func(){ recover() }()
-	assetGen := p.engine.NewAssetGenerator(fw.WithDefaultStyle("photojournalism"))
 	prompt := buildBBCPhotoPrompt(evt)
-	img, err := assetGen.GenerateImage(ctx, &fw.ImageRequest{
-		Prompt:     prompt,
-		Width:      800,
-		Height:     450,
-		Quality:    "high",
-		Variations: 1,
-		Metadata: map[string]interface{}{"event_id": evt.ID, "category": evt.Category},
-	})
-	if err != nil { return }
-	if img != nil && img.URL != "" {
-		// attach to event
-		evt.ImageURL = img.URL
+	client := imgc.New()
+	url, err := client.Generate(ctx, prompt, 800, 450)
+	if err != nil { fmt.Println("[IMAGE] generation error:", err); return }
+	evt.ImageURL = url
+	if p.state != nil && p.state.CurrentTurn != nil && p.state.CurrentTurn.Event.ID == evt.ID {
+		p.state.CurrentTurn.Event.ImageURL = url
 	}
+	fmt.Println("[IMAGE] generated URL:", url)
 }
 
 // buildBBCPhotoPrompt creates the requested BBC/AP style prompt with the event details
