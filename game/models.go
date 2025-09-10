@@ -59,6 +59,15 @@ type TurnResult struct {
 	Impact     WorldMetrics  `json:"impact"`
 }
 
+// AIUsageStats holds the statistics for AI usage
+type AIUsageStats struct {
+	AdvisorTheta   int `json:"advisorTheta"`
+	AdvisorGemini  int `json:"advisorGemini"`
+	DirectorTheta  int `json:"directorTheta"`
+	DirectorGemini int `json:"directorGemini"`
+	RewriteGemini  int `json:"rewriteGemini"`
+}
+
 // GameState holds the current game state
 type GameState struct {
 	Turn        int          `json:"turn"`
@@ -68,4 +77,5 @@ type GameState struct {
 	Advisors    []Advisor    `json:"advisors"`
 	CurrentTurn *TurnResult  `json:"currentTurn,omitempty"`
 	LastUpdated time.Time    `json:"lastUpdated"`
+	Stats       AIUsageStats `json:"stats"`
 }
