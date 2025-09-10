@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"time"
@@ -14,52 +15,69 @@ import (
 type Client struct {
 	BaseURL string
 	HTTP   *http.Client
+	APIKey string
 }
 
 func New() *Client {
 	base := os.Getenv("LLAMA_CHAT_URL")
 	if base == "" {
-		base = "https://llama3170bqobu7bby0a-9c97d6aa8a18a92f.tec-s20.onthetaedgecloud.com/v1/chat/completions"
+		base = "https://ondemand.thetaedgecloud.com/infer_request/llama_3_1_70b/completions"
 	}
-	return &Client{BaseURL: base, HTTP: &http.Client{Timeout: 35 * time.Second}}
+	key := os.Getenv("ON_DEMAND_API_ACCESS_TOKEN")
+	if key == "" {
+		key = os.Getenv("THETA_API_KEY")
+	}
+	return &Client{BaseURL: base, HTTP: &http.Client{Timeout: 35 * time.Second}, APIKey: key}
 }
 
-type ChatReq struct {
-	Model    string        `json:"model"`
-	Messages []ChatMessage `json:"messages"`
-	Stream   bool          `json:"stream,omitempty"`
-}
-
-type ChatMessage struct {
+type LlamaMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
 
-type ChatResp struct {
-	Choices []struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-	} `json:"choices"`
+type LlamaInput struct {
+	MaxTokens   int            `json:"max_tokens,omitempty"`
+	Messages    []LlamaMessage `json:"messages"`
+	Stream      bool           `json:"stream,omitempty"`
+	Temperature float64        `json:"temperature,omitempty"`
+	TopP        float64        `json:"top_p,omitempty"`
+}
+
+type CompleteReq struct {
+	Input LlamaInput `json:"input"`
+}
+
+type CompleteResp struct {
+	Text    string `json:"text"`
+	Output  string `json:"output"`
+	Choices []struct{ Text string `json:"text"` } `json:"choices"`
 }
 
 func (c *Client) Complete(ctx context.Context, prompt string) (string, error) {
-	body := ChatReq{
-		Model:    "llama-3.1-70b-instruct",
-		Messages: []ChatMessage{{Role: "user", Content: prompt}},
-	}
-	b, _ := json.Marshal(body)
+	payload := CompleteReq{Input: LlamaInput{
+		MaxTokens:   500,
+		Messages:    []LlamaMessage{{Role: "system", Content: "You are a helpful assistant"}, {Role: "user", Content: prompt}},
+		Stream:      false,
+		Temperature: 0.5,
+		TopP:        0.7,
+	}}
+	b, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL, bytes.NewReader(b))
 	if err != nil { return "", err }
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	if c.APIKey != "" { req.Header.Set("Authorization", "Bearer "+c.APIKey) }
 	resp, err := c.HTTP.Do(req)
 	if err != nil { return "", err }
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("llama http %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return "", fmt.Errorf("llama http %d: %s", resp.StatusCode, string(body))
 	}
-	var cr ChatResp
+	var cr CompleteResp
 	if err := json.NewDecoder(resp.Body).Decode(&cr); err != nil { return "", err }
-	if len(cr.Choices) == 0 { return "", errors.New("llama empty choices") }
-	return cr.Choices[0].Message.Content, nil
+	if cr.Text != "" { return cr.Text, nil }
+	if cr.Output != "" { return cr.Output, nil }
+	if len(cr.Choices) > 0 && cr.Choices[0].Text != "" { return cr.Choices[0].Text, nil }
+	return "", errors.New("llama empty response")
 }
