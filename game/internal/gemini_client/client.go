@@ -26,7 +26,7 @@ func New() *Client {
 	return &Client{
 		APIKey: key,
 		HTTP:  &http.Client{Timeout: 35 * time.Second},
-		Model: "gemini-1.5-flash-latest",
+		Model: "gemini-2.5-flash-lite",
 	}
 }
 
