@@ -13,6 +13,7 @@ import (
 	"sync"
 	fw "github.com/emergent-world-engine/backend/pkg/framework"
 	gemini "presidential-simulator/internal/gemini_client"
+	llama "presidential-simulator/internal/llama_client"
 )
 
 // GameOrchestrator manages the 5-turn chat game flow
@@ -210,17 +211,7 @@ func sanitizeOpinion(s string) string {
 
 // Streaming advisor dialogue
 func (g *GameOrchestrator) getAdvisorAdviceStream(ctx context.Context, advisor Advisor, event GameEvent) (AdvisorResponse, error) {
-	npc := g.sim.advisors[advisor.ID]
-	if npc == nil {
-		log.Printf("[ADVISOR] NPC not found for %s (%s); trying Gemini fallback", advisor.Name, advisor.ID)
-		if adv, err := g.advisorOpinionViaGemini(ctx, advisor, event); err == nil && adv != "" {
-			g.sim.state.Stats.AdvisorGemini++
-			return AdvisorResponse{AdvisorID: advisor.ID, AdvisorName: advisor.Name, Title: advisor.Title, Advice: adv, Recommendation: 0}, nil
-		}
-		fb := synthFallbackAdvice(advisor)
-		return AdvisorResponse{AdvisorID: advisor.ID, AdvisorName: advisor.Name, Title: advisor.Title, Advice: fb, Recommendation: 0}, nil
-	}
-
+	// Build prompt for advisor
 	buildPrompt := func() string {
 		persona := fmt.Sprintf("%s (%s) specialty=%s traits=%s", advisor.Name, advisor.Title, advisor.Specialty, advisor.Personality)
 		return fmt.Sprintf(`ROLE: Senior presidential advisor.
@@ -235,16 +226,15 @@ If unsure, still give best judgment.`,
 			persona, event.Title, event.Category, event.Severity, event.Description)
 	}
 
-	var buf strings.Builder
-	onChunk := func(tok string) { buf.WriteString(tok) }
 	prompt := buildPrompt()
-	resp, err := npc.GenerateDialogueStream(ctx, &fw.DialogueRequest{PlayerMessage: prompt}, onChunk)
 	usedTheta := false
-	if err == nil {
-		usedTheta = true
-	}
+
+	// Call Llama chat completions endpoint (non-streaming)
+	cctx, cancel := context.WithTimeout(ctx, 35*time.Second)
+	defer cancel()
+	out, err := llama.New().Complete(cctx, prompt)
 	if err != nil {
-		log.Printf("[ADVISOR] %s stream error: %v; trying Gemini fallback", advisor.Name, err)
+		log.Printf("[ADVISOR] %s llama endpoint error: %v; trying Gemini fallback", advisor.Name, err)
 		if adv, gerr := g.advisorOpinionViaGemini(ctx, advisor, event); gerr == nil && adv != "" {
 			g.sim.state.Stats.AdvisorGemini++
 			return AdvisorResponse{AdvisorID: advisor.ID, AdvisorName: advisor.Name, Title: advisor.Title, Advice: adv, Recommendation: 0}, nil
@@ -252,10 +242,10 @@ If unsure, still give best judgment.`,
 		fb := synthFallbackAdvice(advisor)
 		return AdvisorResponse{AdvisorID: advisor.ID, AdvisorName: advisor.Name, Title: advisor.Title, Advice: fb, Recommendation: 0}, nil
 	}
-	raw := strings.TrimSpace(resp.Message)
-	if raw == "" { raw = strings.TrimSpace(buf.String()) }
+	raw := strings.TrimSpace(out)
+	usedTheta = true
+
 	final := extractAdvisorOpinion(raw)
-	// Guard: if meta-characters like braces present, treat as invalid and fallback
 	if looksMetaLike(final) {
 		log.Printf("[ADVISOR] %s meta-like advisory rejected: %q", advisor.Name, snippet(final, 120))
 		final = ""
@@ -267,7 +257,7 @@ If unsure, still give best judgment.`,
 			final = adv
 			usedTheta = false
 		} else if gerr != nil {
-			log.Printf("[ADVISOR] %s Gemini fallback failed: %v", advisor.Name, gerr)
+			log.Printf("[ADVISOR] %s Gemini fallback failed detail: %v", advisor.Name, gerr)
 		}
 	}
 	if final == "" {
@@ -406,7 +396,7 @@ func (g *GameOrchestrator) evaluateChoice(ctx context.Context, turnResult *TurnR
 			if strings.TrimSpace(analysis) == "" { analysis = formatDirectorNarrative(turnResult, impact) }
 			return analysis, impact, nil
 		}
-		log.Printf("[DIRECTOR] Gemini fallback failed: %v (using random)", gerr)
+		log.Printf("[DIRECTOR] Gemini fallback failed detail: %v (using random)", gerr)
 		return g.randomEval(turnResult), g.randomImpact(), nil
 	}
 
@@ -427,7 +417,7 @@ func (g *GameOrchestrator) evaluateChoice(ctx context.Context, turnResult *TurnR
 		if strings.TrimSpace(analysis2) == "" { analysis2 = formatDirectorNarrative(turnResult, impact2) }
 		return analysis2, impact2, nil
 	}
-	log.Printf("[DIRECTOR] Gemini evaluation failed: %v (using random)", gerr2)
+	log.Printf("[DIRECTOR] Gemini evaluation failed detail: %v (using random)", gerr2)
 	return g.randomEval(turnResult), g.randomImpact(), nil
 }
 
@@ -541,21 +531,7 @@ func (g *GameOrchestrator) directorMetricsViaGemini(ctx context.Context, t *Turn
 
 // rewriteEventDescription converts the raw event description into a viral BREAKING NEWS style post
 func (g *GameOrchestrator) rewriteEventDescription(ctx context.Context, event GameEvent) (string, error) {
-	id := fmt.Sprintf("news_rewriter_%d", time.Now().UnixNano())
-	npc := g.sim.engine.NewNPC(id,
-		fw.WithPersonality("Urgent, sensational social media editor who writes concise breaking news threads"),
-		fw.WithBackground("Veteran crisis reporter and newsroom copy chief"),
-	)
-	if npc == nil {
-		// Gemini fallback
-		if out, err := g.rewriteEventViaGemini(ctx, event); err == nil { 
-			g.sim.state.Stats.RewriteGemini++
-			return out, nil 
-		}
-		return "", fmt.Errorf("failed to init news rewriter")
-	}
-	npc.Config().DialogueModel = fw.ModelLlama70B
-
+	// Use Llama chat completions endpoint directly; Gemini as fallback
 	prompt := fmt.Sprintf(
 		"Rewrite the following event into a viral BREAKING NEWS social media post with these rules:\n\n"+
 		"1) Formatting and Style (CRUCIAL):\n"+
@@ -575,31 +551,19 @@ func (g *GameOrchestrator) rewriteEventDescription(ctx context.Context, event Ga
 		"Output only the finished post. No preambles.",
 		event.Title, event.Category, event.Severity, event.Description,
 	)
-
-	// Use streaming with timeout for robustness
 	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	var buf strings.Builder
-	onChunk := func(tok string) { buf.WriteString(tok) }
-	resp, err := npc.GenerateDialogueStream(cctx, &fw.DialogueRequest{PlayerMessage: prompt}, onChunk)
-	if err != nil {
-		log.Printf("[REWRITE] llama error: %v; trying Gemini fallback", err)
-		if out, gerr := g.rewriteEventViaGemini(ctx, event); gerr == nil { 
-			g.sim.state.Stats.RewriteGemini++
-			return out, nil 
-		}
-		return "", err
+	out, err := llama.New().Complete(cctx, prompt)
+	if err == nil && strings.TrimSpace(out) != "" {
+		return strings.TrimSpace(out), nil
 	}
-	out := strings.TrimSpace(resp.Message)
-	if out == "" { out = strings.TrimSpace(buf.String()) }
-	if out == "" {
-		if oo, gerr := g.rewriteEventViaGemini(ctx, event); gerr == nil { 
-			g.sim.state.Stats.RewriteGemini++
-			return oo, nil 
-		}
-		return "", fmt.Errorf("empty rewrite")
+	if err != nil { log.Printf("[REWRITE] llama endpoint error: %v; trying Gemini fallback", err) }
+	// Gemini fallback
+	if oo, gerr := g.rewriteEventViaGemini(ctx, event); gerr == nil { 
+		g.sim.state.Stats.RewriteGemini++
+		return oo, nil 
 	}
-	return out, nil
+	return "", fmt.Errorf("empty rewrite")
 }
 
 func (g *GameOrchestrator) rewriteEventViaGemini(ctx context.Context, event GameEvent) (string, error) {

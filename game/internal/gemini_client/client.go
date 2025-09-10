@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"time"
@@ -24,7 +25,7 @@ func New() *Client {
 	key := os.Getenv("GOOGLE_AI_API_KEY")
 	return &Client{
 		APIKey: key,
-		HTTP:  &http.Client{Timeout: 20 * time.Second},
+		HTTP:  &http.Client{Timeout: 35 * time.Second},
 		Model: "gemini-1.5-flash-latest",
 	}
 }
@@ -76,7 +77,9 @@ func (c *Client) GenerateText(ctx context.Context, prompt string) (string, error
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("gemini http %d", resp.StatusCode)
+		// Read a small snippet of the error body to help diagnose (without huge logs)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return "", fmt.Errorf("gemini http %d: %s", resp.StatusCode, string(body))
 	}
 	var gr generateResponse
 	if err := json.NewDecoder(resp.Body).Decode(&gr); err != nil {
