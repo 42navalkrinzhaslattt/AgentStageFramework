@@ -59,22 +59,37 @@ func NewWebServer(orchestrator *GameOrchestrator, port string) *WebServer {
 	}
 }
 
+func (ws *WebServer) corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		
+		next(w, r)
+	}
+}
+
 // Start starts the web server
 func (ws *WebServer) Start() error {
 	// Serve static files
 	http.HandleFunc("/", ws.serveStaticFile)
 
 	// Existing API endpoints (kept for compatibility)
-	http.HandleFunc("/api/start", ws.handleStart)
-	http.HandleFunc("/api/state", ws.handleGetState)
-	http.HandleFunc("/api/new-turn", ws.handleNewTurn)
-	http.HandleFunc("/api/choice", ws.handlePlayerChoice)
+	http.HandleFunc("/api/start", ws.corsMiddleware(ws.handleStart))
+	http.HandleFunc("/api/state", ws.corsMiddleware(ws.handleGetState))
+	http.HandleFunc("/api/new-turn", ws.corsMiddleware(ws.handleNewTurn))
+	http.HandleFunc("/api/choice", ws.corsMiddleware(ws.handlePlayerChoice))
 
 	// New requested endpoints
-	http.HandleFunc("/api/new-round", ws.handleNewRound)
-	http.HandleFunc("/api/evaluate-choice", ws.handleEvaluateChoice)
+	http.HandleFunc("/api/new-round", ws.corsMiddleware(ws.handleNewRound))
+	http.HandleFunc("/api/evaluate-choice", ws.corsMiddleware(ws.handleEvaluateChoice))
 	// Stats-only endpoint
-	http.HandleFunc("/api/stats", ws.handleStats)
+	http.HandleFunc("/api/stats", ws.corsMiddleware(ws.handleStats))
 
 	log.Printf("🌐 Presidential Simulator server starting on http://localhost:%s", ws.port)
 	return http.ListenAndServe(":"+ws.port, nil)
