@@ -21,11 +21,13 @@ type WebServer struct {
 
 // ChatMessage is a UI-friendly message item for the client feed
 type ChatMessage struct {
+	ID             string `json:"id"`
 	Name           string `json:"name"`
 	Text           string `json:"text"`
 	Title          string `json:"title"`
 	TitleColor     string `json:"titleColor"`
 	Time           string `json:"time"`
+	Timestamp      int64  `json:"timestamp"`
 	ProfilePicture string `json:"profilePicture"`
 }
 
@@ -386,23 +388,32 @@ func (ws *WebServer) handleNewRound(w http.ResponseWriter, r *http.Request) {
 
 	// Build message list: 1) Event message 2) Advisor messages
 	msgs := make([]ChatMessage, 0, 1+len(turnResult.Advisors))
-	now := time.Now().UTC().Format(time.RFC3339)
+	baseTime := time.Now().UTC()
+	timestamp := baseTime.Unix()
+	
 	evt := turnResult.Event
 	msgs = append(msgs, ChatMessage{
+		ID:             fmt.Sprintf("event_%d_%d", ws.orchestrator.sim.state.Turn, timestamp),
 		Name:           "News Desk",
 		Text:           evt.Description,
 		Title:          evt.Title,
 		TitleColor:     colorForCategory(evt.Category),
-		Time:           now,
+		Time:           baseTime.Format(time.RFC3339),
+		Timestamp:      timestamp,
 		ProfilePicture: avatarURL("news"),
 	})
-	for _, a := range turnResult.Advisors {
+	
+	for i, a := range turnResult.Advisors {
+		advisorTime := baseTime.Add(time.Duration(i+1) * time.Second)
+		advisorTimestamp := advisorTime.Unix()
 		msgs = append(msgs, ChatMessage{
+			ID:             fmt.Sprintf("advisor_%s_%d_%d", a.AdvisorID, ws.orchestrator.sim.state.Turn, advisorTimestamp),
 			Name:           a.AdvisorName,
 			Text:           a.Advice,
 			Title:          a.Title,
 			TitleColor:     colorForSpecialty(strings.ToLower(findAdvisorSpecialty(ws.orchestrator.sim.state.Advisors, a.AdvisorID))),
-			Time:           now,
+			Time:           advisorTime.Format(time.RFC3339),
+			Timestamp:      advisorTimestamp,
 			ProfilePicture: avatarURL(a.AdvisorID),
 		})
 	}
@@ -468,14 +479,17 @@ func (ws *WebServer) handleEvaluateChoice(w http.ResponseWriter, r *http.Request
 	hist := ws.orchestrator.sim.state.History
 	last := hist[len(hist)-1]
 
-	now := time.Now().UTC().Format(time.RFC3339)
+	evalTime := time.Now().UTC()
+	evalTimestamp := evalTime.Unix()
 	msgs := []ChatMessage{
 		{
+			ID:             fmt.Sprintf("evaluation_%d_%d", ws.orchestrator.sim.state.Turn, evalTimestamp),
 			Name:           "Director",
 			Text:           last.Evaluation,
 			Title:          "Evaluation",
 			TitleColor:     "#333333",
-			Time:           now,
+			Time:           evalTime.Format(time.RFC3339),
+			Timestamp:      evalTimestamp,
 			ProfilePicture: avatarURL("director"),
 		},
 	}

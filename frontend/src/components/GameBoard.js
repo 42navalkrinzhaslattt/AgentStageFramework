@@ -220,6 +220,7 @@ function GameBoard() {
     loading,
     error,
     isComplete,
+    messages: apiMessages,
     newRound,
     evaluateChoice,
   } = useGame();
@@ -227,15 +228,14 @@ function GameBoard() {
   const [gamePhase, setGamePhase] = useState(GamePhase.WAITING_FOR_EVENT);
   const [selectedChoice, setSelectedChoice] = useState(null);
   const [reasoning, setReasoning] = useState("");
-  const [messages, setMessages] = useState([]);
-  const [advisorMessages, setAdvisorMessages] = useState([]);
+  const [userMessages, setUserMessages] = useState([]);
   const [isStartingRound, setIsStartingRound] = useState(false);
   const [inputMessage, setInputMessage] = useState("");
   const messagesEndRef = useRef(null);
   const hasStartedRound = useRef(false);
   const textareaRef = useRef(null);
 
-  const addMessage = useCallback((text, isBot = false) => {
+  const addUserMessage = useCallback((text, isBot = false) => {
     const now = Date.now();
     const newMessage = {
       id: now + Math.random(),
@@ -247,7 +247,7 @@ function GameBoard() {
         minute: "2-digit",
       }),
     };
-    setMessages((prev) => [...prev, newMessage]);
+    setUserMessages((prev) => [...prev, newMessage]);
   }, []);
 
   const scrollToBottom = () => {
@@ -256,7 +256,7 @@ function GameBoard() {
 
   const handleSendMessage = async () => {
     if (inputMessage.trim()) {
-      addMessage(inputMessage, false);
+      addUserMessage(inputMessage, false);
       const messageText = inputMessage;
       setInputMessage("");
       if (textareaRef.current) {
@@ -273,7 +273,7 @@ function GameBoard() {
           );
         } catch (err) {
           console.error("Failed to send message:", err);
-          addMessage(`❌ Ошибка отправки сообщения: ${err.message}`, true);
+          addUserMessage(`❌ Ошибка отправки сообщения: ${err.message}`, true);
         }
       }
     }
@@ -301,28 +301,24 @@ function GameBoard() {
     hasStartedRound.current = true;
     setIsStartingRound(true);
     setGamePhase(GamePhase.WAITING_FOR_EVENT);
-    setAdvisorMessages([]);
     try {
       const result = await newRound();
       if (result.gameOver) {
         setGamePhase(GamePhase.GAME_OVER);
-        addMessage("🏁 Game completed!", true);
       } else {
         setGamePhase(GamePhase.SHOWING_EVENT);
       }
     } catch (err) {
       console.error("Failed to start new round:", err);
-      addMessage("❌ Error loading event", true);
     } finally {
       setIsStartingRound(false);
       hasStartedRound.current = false;
     }
-  }, [isStartingRound, newRound, addMessage]);
+  }, [isStartingRound, newRound]);
 
   useEffect(() => {
     if (isComplete) {
       setGamePhase(GamePhase.GAME_OVER);
-      addMessage("🏁 Game completed! Calculating results...", true);
       return;
     }
 
@@ -330,31 +326,12 @@ function GameBoard() {
       startNewRound();
     } else if (currentTurn) {
       setGamePhase(GamePhase.SHOWING_EVENT);
-      addMessage(`📋 New event: ${currentTurn.event.title}`, true);
-      addMessage(currentTurn.event.description, true);
-
-      if (currentTurn.advisors && currentTurn.advisors.length > 0) {
-        addMessage("💼 Your advisors weigh in:", true);
-        const now = Date.now();
-        const advisorMessagesWithTime = currentTurn.advisors.map(
-          (advisor, index) => ({
-            ...advisor,
-            id: `advisor-${now}-${index}`,
-            timestamp: now + index + 1,
-            time: new Date().toLocaleTimeString("ru-RU", {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
-          })
-        );
-        setAdvisorMessages(advisorMessagesWithTime);
-      }
     }
   }, [turn, maxTurns, currentTurn, isComplete, isStartingRound, startNewRound]);
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [apiMessages, userMessages]);
 
   const handleChoiceSelect = (optionIndex, option) => {
     setSelectedChoice({ optionIndex, option });
@@ -417,7 +394,7 @@ function GameBoard() {
       </Header>
 
       <MessagesArea>
-        {[...messages.map(msg => ({...msg, type: 'message'})), ...advisorMessages.map(adv => ({...adv, type: 'advisor'}))]
+        {[...(apiMessages || []).map(msg => ({...msg, type: 'message'})), ...(userMessages || []).map(msg => ({...msg, type: 'user'}))]
           .sort((a, b) => {
             const timeA = a.timestamp || 0;
             const timeB = b.timestamp || 0;
@@ -428,9 +405,13 @@ function GameBoard() {
               return (
                 <MessageComponent
                   key={item.id}
-                  message={item.text}
-                  isSystem={item.isBot}
+                  message={item.text || item.content}
+                  isSystem={item.isBot || item.role === 'system'}
                   time={item.timestamp || Date.now()}
+                  name={item.name}
+                  title={item.title}
+                  titleColor={item.titleColor}
+                  profilePicture={item.profilePicture}
                 />
               );
             } else {

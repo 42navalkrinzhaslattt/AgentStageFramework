@@ -18,6 +18,7 @@ const initialState = {
   currentTurn: null,
   history: [],
   advisors: [],
+  messages: [],
   isComplete: false,
   loading: false,
   error: null,
@@ -54,6 +55,7 @@ function gameReducer(state, action) {
         currentTurn: action.payload.turnResult,
         metrics: action.payload.metrics || state.metrics,
         stats: action.payload.stats,
+        messages: action.payload.messages ? [...state.messages, ...action.payload.messages] : state.messages,
         loading: false,
       };
     case "EVALUATE_CHOICE":
@@ -65,6 +67,7 @@ function gameReducer(state, action) {
         turn: action.payload.turn,
         maxTurns: action.payload.maxTurns,
         stats: action.payload.stats,
+        messages: action.payload.messages ? [...state.messages, ...action.payload.messages] : state.messages,
         history: [
           ...state.history,
           {
