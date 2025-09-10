@@ -12,6 +12,7 @@ import (
 	"time"
 	"sync"
 	fw "github.com/emergent-world-engine/backend/pkg/framework"
+	gemini "presidential-simulator/internal/gemini_client"
 )
 
 // GameOrchestrator manages the 5-turn chat game flow
@@ -211,7 +212,11 @@ func sanitizeOpinion(s string) string {
 func (g *GameOrchestrator) getAdvisorAdviceStream(ctx context.Context, advisor Advisor, event GameEvent) (AdvisorResponse, error) {
 	npc := g.sim.advisors[advisor.ID]
 	if npc == nil {
-		log.Printf("[ADVISOR] NPC not found for %s (%s); using fallback", advisor.Name, advisor.ID)
+		log.Printf("[ADVISOR] NPC not found for %s (%s); trying Gemini fallback", advisor.Name, advisor.ID)
+		if adv, err := g.advisorOpinionViaGemini(ctx, advisor, event); err == nil && adv != "" {
+			g.sim.state.Stats.AdvisorGemini++
+			return AdvisorResponse{AdvisorID: advisor.ID, AdvisorName: advisor.Name, Title: advisor.Title, Advice: adv, Recommendation: 0}, nil
+		}
 		fb := synthFallbackAdvice(advisor)
 		return AdvisorResponse{AdvisorID: advisor.ID, AdvisorName: advisor.Name, Title: advisor.Title, Advice: fb, Recommendation: 0}, nil
 	}
@@ -234,19 +239,52 @@ If unsure, still give best judgment.`,
 	onChunk := func(tok string) { buf.WriteString(tok) }
 	prompt := buildPrompt()
 	resp, err := npc.GenerateDialogueStream(ctx, &fw.DialogueRequest{PlayerMessage: prompt}, onChunk)
+	usedTheta := false
+	if err == nil {
+		usedTheta = true
+	}
 	if err != nil {
-		log.Printf("[ADVISOR] %s stream error: %v", advisor.Name, err)
+		log.Printf("[ADVISOR] %s stream error: %v; trying Gemini fallback", advisor.Name, err)
+		if adv, gerr := g.advisorOpinionViaGemini(ctx, advisor, event); gerr == nil && adv != "" {
+			g.sim.state.Stats.AdvisorGemini++
+			return AdvisorResponse{AdvisorID: advisor.ID, AdvisorName: advisor.Name, Title: advisor.Title, Advice: adv, Recommendation: 0}, nil
+		}
 		fb := synthFallbackAdvice(advisor)
 		return AdvisorResponse{AdvisorID: advisor.ID, AdvisorName: advisor.Name, Title: advisor.Title, Advice: fb, Recommendation: 0}, nil
 	}
 	raw := strings.TrimSpace(resp.Message)
 	if raw == "" { raw = strings.TrimSpace(buf.String()) }
 	final := extractAdvisorOpinion(raw)
+	// Guard: if meta-characters like braces present, treat as invalid and fallback
+	if looksMetaLike(final) {
+		log.Printf("[ADVISOR] %s meta-like advisory rejected: %q", advisor.Name, snippet(final, 120))
+		final = ""
+	}
+	if final == "" {
+		if adv, gerr := g.advisorOpinionViaGemini(ctx, advisor, event); gerr == nil && adv != "" {
+			g.sim.state.Stats.AdvisorGemini++
+			log.Printf("[ADVISOR] %s using Gemini fallback", advisor.Name)
+			final = adv
+			usedTheta = false
+		} else if gerr != nil {
+			log.Printf("[ADVISOR] %s Gemini fallback failed: %v", advisor.Name, gerr)
+		}
+	}
 	if final == "" {
 		final = synthFallbackAdvice(advisor)
+		log.Printf("[ADVISOR] %s using hardcoded fallback advisory", advisor.Name)
 		if final == "" { return AdvisorResponse{}, errors.New("unable to derive advisor opinion") }
 	}
+	if usedTheta && final != "" { g.sim.state.Stats.AdvisorTheta++ }
 	return AdvisorResponse{AdvisorID: advisor.ID, AdvisorName: advisor.Name, Title: advisor.Title, Advice: final, Recommendation: 0}, nil
+}
+
+var badCharsRE = regexp.MustCompile(`[{}\[\]<>()]`)
+func looksMetaLike(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" { return false }
+	if badCharsRE.MatchString(s) { return true }
+	return false
 }
 
 // fallback evaluation
@@ -342,49 +380,163 @@ func snippet(s string, n int) string { if len(s) <= n { return s }; return s[:n]
 
 // synthFallbackAdvice (restored)
 func synthFallbackAdvice(advisor Advisor) string {
-	return fmt.Sprintf("%s (%s): Provide a stabilizing course.", advisor.Name, advisor.Title)
+	// Avoid parentheses/brackets in fallback to not resemble meta/formatting
+	return "Provide a stabilizing course"
 }
 
 // Use Director for evaluation (restored)
 func (g *GameOrchestrator) evaluateChoice(ctx context.Context, turnResult *TurnResult) (string, WorldMetrics, error) {
 	start := time.Now()
 	log.Printf("[DIRECTOR] evaluating choice turn=%d option=%q category=%s severity=%d", turnResult.Turn, turnResult.Choice.Option, turnResult.Event.Category, turnResult.Event.Severity)
-	de := &fw.GameEvent{Type:"player_choice", PlayerID:"president", Timestamp: time.Now(), Location:"white_house", Action:"decision", Parameters: map[string]interface{}{ "option": turnResult.Choice.Option, "category": turnResult.Event.Category, "severity": turnResult.Event.Severity }}
+	de := &fw.GameEvent{Type:"player_choice", PlayerID:"president", Timestamp: time.Now(), Location:"white_house", Action:"decision", Parameters: map[string]interface{}{
+		"option": turnResult.Choice.Option,
+		"category": turnResult.Event.Category,
+		"severity": turnResult.Event.Severity,
+		"event_title": turnResult.Event.Title,
+		"event_description": turnResult.Event.Description,
+		"reasoning": turnResult.Choice.Reasoning,
+	}}
 	decision, err := g.sim.director.ProcessEvent(ctx, de)
-	if err != nil { log.Printf("[DIRECTOR] error: %v (fallback)", err); return g.randomEval(turnResult), g.randomImpact(), nil }
-	impact := mapDirectorDecisionToMetrics(decision, turnResult.Event.Category)
-	log.Printf("[DIRECTOR] success latency=%s impact={eco:%.1f sec:%.1f dip:%.1f env:%.1f appr:%.1f stab:%.1f}", time.Since(start), impact.Economy, impact.Security, impact.Diplomacy, impact.Environment, impact.Approval, impact.Stability)
-	// Narrative consequence description for UI
-	narr := formatDirectorNarrative(turnResult, impact)
-	return narr, impact, nil
+	if err != nil {
+		log.Printf("[DIRECTOR] error: %v (trying Gemini fallback)", err)
+		analysis, impact, gerr := g.directorMetricsViaGemini(ctx, turnResult)
+		if gerr == nil {
+			g.sim.state.Stats.DirectorGemini++
+			log.Printf("[DIRECTOR] Gemini fallback success latency=%s impact={eco:%.1f sec:%.1f dip:%.1f env:%.1f appr:%.1f stab:%.1f}", time.Since(start), impact.Economy, impact.Security, impact.Diplomacy, impact.Environment, impact.Approval, impact.Stability)
+			if strings.TrimSpace(analysis) == "" { analysis = formatDirectorNarrative(turnResult, impact) }
+			return analysis, impact, nil
+		}
+		log.Printf("[DIRECTOR] Gemini fallback failed: %v (using random)", gerr)
+		return g.randomEval(turnResult), g.randomImpact(), nil
+	}
+
+	// Try to parse strict metrics JSON from Director. If absent, use Gemini path (Option 1).
+	if impact, ok := parseDirectorMetricsFromReasoning(decision.Reasoning); ok {
+		g.sim.state.Stats.DirectorTheta++
+		log.Printf("[DIRECTOR] success (with JSON) latency=%s impact={eco:%.1f sec:%.1f dip:%.1f env:%.1f appr:%.1f stab:%.1f}", time.Since(start), impact.Economy, impact.Security, impact.Diplomacy, impact.Environment, impact.Approval, impact.Stability)
+		analysis := extractAnalysisText(decision.Reasoning)
+		if strings.TrimSpace(analysis) == "" { analysis = formatDirectorNarrative(turnResult, impact) }
+		return analysis, impact, nil
+	}
+
+	log.Printf("[DIRECTOR] no final metrics JSON found; using Gemini evaluation path")
+	analysis2, impact2, gerr2 := g.directorMetricsViaGemini(ctx, turnResult)
+	if gerr2 == nil {
+		g.sim.state.Stats.DirectorGemini++
+		log.Printf("[DIRECTOR] Gemini fallback success latency=%s impact={eco:%.1f sec:%.1f dip:%.1f env:%.1f appr:%.1f stab:%.1f}", time.Since(start), impact2.Economy, impact2.Security, impact2.Diplomacy, impact2.Environment, impact2.Approval, impact2.Stability)
+		if strings.TrimSpace(analysis2) == "" { analysis2 = formatDirectorNarrative(turnResult, impact2) }
+		return analysis2, impact2, nil
+	}
+	log.Printf("[DIRECTOR] Gemini evaluation failed: %v (using random)", gerr2)
+	return g.randomEval(turnResult), g.randomImpact(), nil
 }
 
-func formatDirectorNarrative(t *TurnResult, _ WorldMetrics) string {
-	// Pure narrative without explicit metric changes; the numbers will be shown elsewhere
-	var b strings.Builder
-	fmt.Fprintf(&b, "In response to %s (%s, severity %d/10), you moved decisively. ", t.Event.Title, t.Event.Category, t.Event.Severity)
-	// Category-informed ripple description (no deltas)
-	s := strings.ToLower(t.Event.Category)
-	switch s {
-	case "economy":
-		b.WriteString("Markets brace and messaging shifts toward coordination and relief. ")
-	case "security", "military", "military_intervention":
-		b.WriteString("Readiness tightens, allies take note, and diplomatic friction simmers. ")
-	case "civil_rights":
-		b.WriteString("Rule-of-law framing and rights protections shape public trust and coalitions. ")
-	case "environment", "climate":
-		b.WriteString("Resilience and long-horizon investment narratives dominate the airwaves. ")
-	case "technology":
-		b.WriteString("Systems hardening and incident command take center stage as confidence rebuilds. ")
-	case "public_health":
-		b.WriteString("Response cadence steadies nerves and restores a sense of predictability. ")
-	case "diplomacy", "geopolitics":
-		b.WriteString("Signal discipline and backchannels recalibrate the regional balance. ")
-	default:
-		b.WriteString("Stakeholders reposition quickly as your stance becomes the new baseline. ")
+// Extracts text before the last JSON object in a string.
+func extractAnalysisText(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" { return "" }
+	start := strings.LastIndex(s, "{")
+	end := strings.LastIndex(s, "}")
+	if start >= 0 && end > start {
+		return strings.TrimSpace(s[:start])
 	}
-	b.WriteString("All eyes are on the White House as the next moves are queued up.")
-	return strings.TrimSpace(b.String())
+	return s
+}
+
+func formatDirectorNarrative(t *TurnResult, impact WorldMetrics) string {
+	reason := strings.TrimSpace(t.Choice.Reasoning)
+	if len(reason) > 220 { reason = reason[:220] + "..." }
+	header := fmt.Sprintf("Action Analysis: In response to \"%s\" (%s, severity %d), the administration chose: %s.", t.Event.Title, t.Event.Category, t.Event.Severity, reason)
+	parts := make([]string, 0, 6)
+	add := func(name string, v float64) {
+		if v == 0 { return }
+		sign := "+"
+		val := v
+		if v < 0 { sign = "-"; val = -v }
+		parts = append(parts, fmt.Sprintf("%s %s%.0f", name, sign, val))
+	}
+	add("Economy", impact.Economy)
+	add("National Security", impact.Security)
+	add("Geopolitical Standing", impact.Diplomacy)
+	add("Environment", impact.Environment)
+	add("Public Opinion", impact.Approval)
+	add("Stability", impact.Stability)
+	impactLine := "Metric Impact: " + strings.Join(parts, ", ")
+	return strings.TrimSpace(header + " " + impactLine)
+}
+
+// parseDirectorMetricsFromReasoning extracts only if a final JSON with metrics exists; no heuristics.
+func parseDirectorMetricsFromReasoning(text string) (WorldMetrics, bool) {
+	text = strings.TrimSpace(text)
+	start := strings.LastIndex(text, "{")
+	end := strings.LastIndex(text, "}")
+	if start >= 0 && end > start {
+		fragment := text[start : end+1]
+		var outer struct{ Metrics map[string]int `json:"metrics"` }
+		if json.Unmarshal([]byte(fragment), &outer) == nil && len(outer.Metrics) > 0 {
+			m := outer.Metrics
+			return WorldMetrics{
+				Economy:     float64(m["economy"]),
+				Security:    float64(m["security"]),
+				Diplomacy:   float64(m["diplomacy"]),
+				Environment: float64(m["environment"]),
+				Approval:    float64(m["approval"]),
+				Stability:   float64(m["stability"]),
+			}, true
+		}
+	}
+	return WorldMetrics{}, false
+}
+
+// --- Gemini fallbacks ---
+
+func (g *GameOrchestrator) advisorOpinionViaGemini(ctx context.Context, advisor Advisor, event GameEvent) (string, error) {
+	c := gemini.New()
+	if c.APIKey == "" {
+		return "", errors.New("GOOGLE_AI_API_KEY not set")
+	}
+	pp := fmt.Sprintf(`You are %s (%s), a senior presidential advisor.
+Event: %s
+Category: %s (severity %d/10)
+Description: %s
+Task: Provide one concise, actionable advisory opinion.
+Constraints: 2-4 sentences. No internal reasoning, no preamble, no self-reference.
+Output ONLY valid JSON exactly like: {"advisor_opinion":"<your concise advisory>"}
+No markdown.`, advisor.Name, advisor.Title, event.Title, event.Category, event.Severity, event.Description)
+	ctx2, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	out, err := c.GenerateText(ctx2, pp)
+	if err != nil { return "", err }
+	op := extractAdvisorOpinion(strings.TrimSpace(out))
+	if op == "" || looksMetaLike(op) { return "", errors.New("gemini returned invalid advisor_opinion") }
+	return op, nil
+}
+
+func (g *GameOrchestrator) directorMetricsViaGemini(ctx context.Context, t *TurnResult) (string, WorldMetrics, error) {
+	c := gemini.New()
+	if c.APIKey == "" {
+		return "", WorldMetrics{}, errors.New("GOOGLE_AI_API_KEY not set")
+	}
+	// Build evaluation prompt per spec, but require the final line JSON to use internal keys
+	metricsList := `Public Opinion:\n\nEconomy:\n\nNational Security:\n\nGeopolitical Standing:\n\nTech Sector Confidence:\n\nCivil Liberties:`
+	pp := fmt.Sprintf(`Event Evaluation Prompt\nYou are an expert political and economic analyst AI. Your task is to evaluate a player's action in response to a specific event within a presidential simulator game.\n\nAnalyze the provided Event Description and the player's Chosen Action. Based on this analysis, determine the numerical impact on the given Game Metrics. For each metric change, you must provide a brief, clear justification.\n\n1. Event Description\n%s\n\n2. Player's Chosen Action\n%s\n\n3. Game Metrics\n%s\n\n4. Evaluation Task\nInstructions:\n- Step 1: Analyze the Action's Logic and Consequences. Briefly summarize immediate and long-term consequences.\n- Step 2: Determine Metric Changes and Provide Justification. For each game metric, provide a numerical change (e.g., +15, -20, 0) and a one-sentence justification.\n\nExample Output Structure:\nAction Analysis: <2-4 sentences>\n\nMetric Impact:\nPublic Opinion: +10. Justification: <why>.\nEconomy: -5. Justification: <why>.\nNational Security: +20. Justification: <why>.\nGeopolitical Standing: +5. Justification: <why>.\nTech Sector Confidence: -15. Justification: <why>.\nCivil Liberties: -10. Justification: <why>.\n\nCRUCIAL: After your analysis and metric impact lines, output exactly ONE final line containing ONLY a JSON object with integer deltas for: {"metrics":{"economy":E,"security":S,"diplomacy":D,"environment":Env,"approval":A,"stability":St}}. Map as follows: Public Opinion->approval, Economy->economy, National Security->security, Geopolitical Standing->diplomacy, Tech Sector Confidence->stability, Civil Liberties->approval (also subtract half into stability if negative). Use range -20..20. Do NOT include any text or markdown after the JSON.`,
+		t.Event.Description,
+		t.Choice.Reasoning,
+		metricsList,
+	)
+	ctx2, cancel := context.WithTimeout(ctx, 22*time.Second)
+	defer cancel()
+	out, err := c.GenerateText(ctx2, pp)
+	if err != nil { return "", WorldMetrics{}, err }
+	analysis := extractAnalysisText(strings.TrimSpace(out))
+	// Reuse existing JSON extraction by fabricating a DirectorDecision
+	dd := &fw.DirectorDecision{Reasoning: strings.TrimSpace(out)}
+	imp := mapDirectorDecisionToMetrics(dd, t.Event.Category)
+	// If still zero, apply category fallback
+	if imp == (WorldMetrics{}) {
+		imp = mapDirectorDecisionToMetrics(&fw.DirectorDecision{Reasoning: "{}"}, t.Event.Category)
+	}
+	return strings.TrimSpace(analysis), imp, nil
 }
 
 // rewriteEventDescription converts the raw event description into a viral BREAKING NEWS style post
@@ -395,6 +547,11 @@ func (g *GameOrchestrator) rewriteEventDescription(ctx context.Context, event Ga
 		fw.WithBackground("Veteran crisis reporter and newsroom copy chief"),
 	)
 	if npc == nil {
+		// Gemini fallback
+		if out, err := g.rewriteEventViaGemini(ctx, event); err == nil { 
+			g.sim.state.Stats.RewriteGemini++
+			return out, nil 
+		}
 		return "", fmt.Errorf("failed to init news rewriter")
 	}
 	npc.Config().DialogueModel = fw.ModelLlama70B
@@ -426,10 +583,36 @@ func (g *GameOrchestrator) rewriteEventDescription(ctx context.Context, event Ga
 	onChunk := func(tok string) { buf.WriteString(tok) }
 	resp, err := npc.GenerateDialogueStream(cctx, &fw.DialogueRequest{PlayerMessage: prompt}, onChunk)
 	if err != nil {
+		log.Printf("[REWRITE] llama error: %v; trying Gemini fallback", err)
+		if out, gerr := g.rewriteEventViaGemini(ctx, event); gerr == nil { 
+			g.sim.state.Stats.RewriteGemini++
+			return out, nil 
+		}
 		return "", err
 	}
 	out := strings.TrimSpace(resp.Message)
 	if out == "" { out = strings.TrimSpace(buf.String()) }
-	if out == "" { return "", fmt.Errorf("empty rewrite") }
+	if out == "" {
+		if oo, gerr := g.rewriteEventViaGemini(ctx, event); gerr == nil { 
+			g.sim.state.Stats.RewriteGemini++
+			return oo, nil 
+		}
+		return "", fmt.Errorf("empty rewrite")
+	}
 	return out, nil
+}
+
+func (g *GameOrchestrator) rewriteEventViaGemini(ctx context.Context, event GameEvent) (string, error) {
+	c := gemini.New()
+	if c.APIKey == "" { return "", errors.New("GOOGLE_AI_API_KEY not set") }
+	pp := fmt.Sprintf(
+		"Rewrite the following event into a viral BREAKING NEWS social media post with these rules. Output only the finished post, no preamble.\n\n"+
+		"- Headline ALL-CAPS with emojis.\n- Urgent short sentences.\n- Emoji-led bolded section titles.\n- Include a single line placeholder for an image like ``.\n- End with relevant hashtags.\n\n"+
+		"Name an entity (use 'AegisNet' if AI/tech implicated), show chaos, mention the White House/The President, contrast official statement vs rumor/intel, end noting all eyes are on the President.\n\n"+
+		"Title: %s\nCategory: %s\nSeverity: %d/10\nDescription: %s",
+		event.Title, event.Category, event.Severity, event.Description,
+	)
+	ctx2, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	return c.GenerateText(ctx2, pp)
 }

@@ -323,21 +323,40 @@ type DifficultyAdjustment struct {
 // Helper methods
 
 func (d *Director) buildEventAnalysisPrompt(event *GameEvent) string {
-	prompt := fmt.Sprintf("As an AI Game Director, analyze this game event and provide strategic guidance.\n")
-	prompt += fmt.Sprintf("Event Type: %s\n", event.Type)
-	prompt += fmt.Sprintf("Player Action: %s\n", event.Action)
-	prompt += fmt.Sprintf("Location: %s\n", event.Location)
-
-	if d.config != nil && d.config.StrategicFocus != "" {
-		prompt += fmt.Sprintf("Strategic Focus: %s\n", d.config.StrategicFocus)
+	// Extract richer context if provided via Parameters
+	var (
+		evtTitle any
+		evtDesc any
+		reason  any
+		cat    any
+		sev    any
+	)
+	if event.Parameters != nil {
+		evtTitle = event.Parameters["event_title"]
+		evtDesc = event.Parameters["event_description"]
+		reason = event.Parameters["reasoning"]
+		cat = event.Parameters["category"]
+		sev = event.Parameters["severity"]
 	}
+	if evtTitle == nil { evtTitle = event.Type }
+	if evtDesc == nil { evtDesc = fmt.Sprintf("Action=%s at %s", event.Action, event.Location) }
+	if reason == nil { reason = "(no player reasoning provided)" }
+	if cat == nil { cat = "general" }
+	if sev == nil { sev = 5 }
 
-	prompt += "Provide strategic analysis and recommend actions to enhance the player experience.\n"
-	prompt += "After analysis, output a single JSON object ONLY on the final line with integer deltas -10..10 for metrics: economy, security, diplomacy, environment, approval, stability.\n"
-	prompt += "Set at least 3 non-zero metrics, considering realistic cross-domain spillover effects (e.g., security actions affect stability and diplomacy; environmental actions affect approval and economy).\n"
-	prompt += "Format: {\"metrics\":{\"economy\":E,\"security\":S,\"diplomacy\":D,\"environment\":Env,\"approval\":A,\"stability\":St}}\n"
-	prompt += "If uncertain set a field to 0. Do not wrap in markdown or add commentary after JSON."
-
+	metricsList := "Public Opinion:\n\nEconomy:\n\nNational Security:\n\nGeopolitical Standing:\n\nTech Sector Confidence:\n\nCivil Liberties:"
+	prompt := fmt.Sprintf(
+		"Event Evaluation Prompt\nYou are an expert political and economic analyst AI. Your task is to evaluate a player's action in response to a specific event within a presidential simulator game.\n\n"+
+		"Analyze the provided Event Description and the player's Chosen Action. Based on this analysis, determine the numerical impact on the given Game Metrics. For each metric change, you must provide a brief, clear justification.\n\n"+
+		"1. Event Description\n%s (%v, severity %v/10)\n\n"+
+		"2. Player's Chosen Action\n%s\n\n"+
+		"3. Game Metrics\n%s\n\n"+
+		"4. Evaluation Task\nInstructions:\n- Step 1: Analyze the Action's Logic and Consequences. Briefly summarize immediate and long-term consequences.\n- Step 2: Determine Metric Changes and Provide Justification. For each game metric, provide a numerical change (e.g., +15, -20, 0) and a one-sentence justification.\n\n"+
+		"Example Output Structure:\nAction Analysis: <2-4 sentences>\n\n"+
+		"Metric Impact:\nPublic Opinion: +10. Justification: <why>.\nEconomy: -5. Justification: <why>.\nNational Security: +20. Justification: <why>.\nGeopolitical Standing: +5. Justification: <why>.\nTech Sector Confidence: -15. Justification: <why>.\nCivil Liberties: -10. Justification: <why>.\n\n"+
+		"CRUCIAL: After your analysis and metric impact lines, output exactly ONE final line containing ONLY a JSON object with integer deltas for: {\"metrics\":{\"economy\":E,\"security\":S,\"diplomacy\":D,\"environment\":Env,\"approval\":A,\"stability\":St}}. Map as follows: Public Opinion->approval, Economy->economy, National Security->security, Geopolitical Standing->diplomacy, Tech Sector Confidence->stability, Civil Liberties->approval (also subtract half into stability if negative). Use range -20..20. If the event is environmental/climate, set environment accordingly; otherwise environment may be 0. Do NOT include any text or markdown after the JSON.",
+		evtDesc, cat, sev, reason, metricsList,
+	)
 	return prompt
 }
 

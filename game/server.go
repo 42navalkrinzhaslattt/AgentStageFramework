@@ -26,6 +26,7 @@ type GameStateResponse struct {
 	IsComplete  bool            `json:"isComplete"`
 	CurrentTurn *TurnResult     `json:"currentTurn,omitempty"`
 	History     []TurnResult    `json:"history"`
+	Stats       AIUsageStats    `json:"stats"`
 }
 
 // NewRoundResponse is returned by the NewRound endpoint
@@ -36,6 +37,7 @@ type NewRoundResponse struct {
 	TurnResult *TurnResult  `json:"turnResult,omitempty"`
 	Metrics    *WorldMetrics `json:"metrics,omitempty"`
 	Newspaper  string       `json:"newspaper,omitempty"`
+	Stats      AIUsageStats `json:"stats"`
 }
 
 // EvaluateResponse is returned by the EvaluatePlayersChoice endpoint
@@ -46,6 +48,7 @@ type EvaluateResponse struct {
 	IsComplete bool          `json:"isComplete"`
 	Turn       int           `json:"turn"`
 	MaxTurns   int           `json:"maxTurns"`
+	Stats      AIUsageStats  `json:"stats"`
 }
 
 // NewWebServer creates a new web server instance
@@ -70,6 +73,8 @@ func (ws *WebServer) Start() error {
 	// New requested endpoints
 	http.HandleFunc("/api/new-round", ws.handleNewRound)
 	http.HandleFunc("/api/evaluate-choice", ws.handleEvaluateChoice)
+	// Stats-only endpoint
+	http.HandleFunc("/api/stats", ws.handleStats)
 
 	log.Printf("🌐 Presidential Simulator server starting on http://localhost:%s", ws.port)
 	return http.ListenAndServe(":"+ws.port, nil)
@@ -116,6 +121,7 @@ func (ws *WebServer) handleStart(w http.ResponseWriter, r *http.Request) {
 	ws.orchestrator.sim.state.Turn = 1
 	ws.orchestrator.sim.state.History = []TurnResult{}
 	ws.orchestrator.sim.state.CurrentTurn = nil
+	ws.orchestrator.sim.state.Stats = AIUsageStats{}
 	minV, maxV := cfg.MetricMin, cfg.MetricMax
 	randVal := func() float64 { return float64(minV + rand.Intn(maxV-minV+1)) }
 	ws.orchestrator.sim.state.Metrics = WorldMetrics{
@@ -134,6 +140,7 @@ func (ws *WebServer) handleStart(w http.ResponseWriter, r *http.Request) {
 		Metrics:    ws.orchestrator.sim.state.Metrics,
 		IsComplete: false,
 		History:    ws.orchestrator.sim.state.History,
+		Stats:      ws.orchestrator.sim.state.Stats,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -149,6 +156,7 @@ func (ws *WebServer) handleGetState(w http.ResponseWriter, r *http.Request) {
 		IsComplete: ws.orchestrator.IsGameComplete(),
 		CurrentTurn: ws.orchestrator.sim.state.CurrentTurn,
 		History:    ws.orchestrator.sim.state.History,
+		Stats:      ws.orchestrator.sim.state.Stats,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -244,6 +252,7 @@ func (ws *WebServer) handlePlayerChoice(w http.ResponseWriter, r *http.Request) 
 		IsComplete:  ws.orchestrator.IsGameComplete(),
 		CurrentTurn: nil,
 		History:     ws.orchestrator.sim.state.History,
+		Stats:       ws.orchestrator.sim.state.Stats,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
@@ -265,6 +274,7 @@ func (ws *WebServer) handleNewRound(w http.ResponseWriter, r *http.Request) {
 			MaxTurns:  ws.orchestrator.sim.state.MaxTurns,
 			Metrics:   &ws.orchestrator.sim.state.Metrics,
 			Newspaper: paper,
+			Stats:     ws.orchestrator.sim.state.Stats,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
@@ -283,6 +293,7 @@ func (ws *WebServer) handleNewRound(w http.ResponseWriter, r *http.Request) {
 			MaxTurns:  ws.orchestrator.sim.state.MaxTurns,
 			Metrics:   &ws.orchestrator.sim.state.Metrics,
 			Newspaper: paper,
+			Stats:     ws.orchestrator.sim.state.Stats,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
@@ -294,6 +305,7 @@ func (ws *WebServer) handleNewRound(w http.ResponseWriter, r *http.Request) {
 		Turn:       ws.orchestrator.sim.state.Turn,
 		MaxTurns:   ws.orchestrator.sim.state.MaxTurns,
 		TurnResult: turnResult,
+		Stats:      ws.orchestrator.sim.state.Stats,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
@@ -347,9 +359,20 @@ func (ws *WebServer) handleEvaluateChoice(w http.ResponseWriter, r *http.Request
 		IsComplete: ws.orchestrator.IsGameComplete(),
 		Turn:       ws.orchestrator.sim.state.Turn,
 		MaxTurns:   ws.orchestrator.sim.state.MaxTurns,
+		Stats:      ws.orchestrator.sim.state.Stats,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+// handleStats returns only the AI usage stats
+func (ws *WebServer) handleStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ws.orchestrator.sim.state.Stats)
 }
 
 // buildEndgameNewspaper creates a simple newspaper-style summary of the run

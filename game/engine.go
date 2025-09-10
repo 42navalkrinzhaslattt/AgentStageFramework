@@ -46,6 +46,7 @@ func NewPresidentSim(apiKey string) (*PresidentSim, error) {
 		},
 		History:     []TurnResult{},
 		LastUpdated: time.Now(),
+		Stats:       AIUsageStats{},
 	}
 
 	// Initialize the 8 advisors
