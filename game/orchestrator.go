@@ -34,6 +34,9 @@ func (g *GameOrchestrator) StartNewTurn(ctx context.Context) (*TurnResult, error
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate event: %w", err)
 	}
+	// Sanitize for both API and terminal flows
+	event.Title = sanitizeEventText(event.Title)
+	event.Description = sanitizeEventText(event.Description)
 
 	// Select 3 random advisors
 	selectedAdvisors := g.selectRandomAdvisors(3)
@@ -115,6 +118,10 @@ func (g *GameOrchestrator) selectRandomAdvisors(count int) []Advisor {
 
 var (
 	jsonCandidateRE = regexp.MustCompile(`\{[\s\S]*?\}`)
+	backticksRE   = regexp.MustCompile("`+")
+	mdBoldRE      = regexp.MustCompile(`\*\*`)
+	hashLineRE    = regexp.MustCompile(`(?m)^\s*#Breaking\b.*$`)
+	advisorsHdrRE = regexp.MustCompile(`(?m)^\s*💼\s*Your advisors weigh in:\s*$`)
 )
 
 // extractAdvisorOpinion attempts layered extraction strategies
@@ -207,6 +214,30 @@ func sanitizeOpinion(s string) string {
 		return strings.TrimSpace(strings.Join(sents, " "))
 	}
 	return out
+}
+
+func sanitizeEventText(s string) string {
+	if s == "" { return s }
+	s = mdBoldRE.ReplaceAllString(s, "")
+	s = strings.ReplaceAll(s, "*", "") // remove any remaining asterisks
+	s = backticksRE.ReplaceAllString(s, "")
+	s = advisorsHdrRE.ReplaceAllString(s, "")
+	s = hashLineRE.ReplaceAllString(s, "")
+	// collapse extra blank lines
+	lines := []string{}
+	prevBlank := false
+	for _, ln := range strings.Split(s, "\n") {
+		ln = strings.TrimRight(ln, " \t")
+		if strings.TrimSpace(ln) == "" {
+			if prevBlank { continue }
+			prevBlank = true
+			lines = append(lines, "")
+			continue
+		}
+		prevBlank = false
+		lines = append(lines, ln)
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 // Streaming advisor dialogue

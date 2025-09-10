@@ -40,7 +40,7 @@ func runTerminalMode(orchestrator *GameOrchestrator) {
 		
 		fmt.Printf("\n" + strings.Repeat("=", 60))
 		fmt.Printf("\n🏛️  TURN %d of %d", orchestrator.sim.state.Turn, orchestrator.sim.state.MaxTurns)
-		fmt.Printf("\n" + strings.Repeat("=", 60))
+		fmt.Printf("\n%s\n", strings.Repeat("=", 60)) // ensure a newline after the separator
 		
 		// Display current metrics
 		displayMetrics(orchestrator.sim.state.Metrics)
@@ -58,8 +58,7 @@ func runTerminalMode(orchestrator *GameOrchestrator) {
 		fmt.Printf("\n🚨 %s\n", turnResult.Event.Title)
 		fmt.Printf("📝 %s\n", turnResult.Event.Description)
 		
-		// Display advisor responses
-		fmt.Println("\n💼 Your advisors weigh in:")
+		// Display advisor responses (no banner line)
 		for i, advisor := range turnResult.Advisors {
 			fmt.Printf("\n%d. 👤 %s:\n", i+1, advisor.AdvisorName)
 			fmt.Printf("   💭 %s\n", advisor.Advice)
