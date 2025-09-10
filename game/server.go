@@ -10,12 +10,23 @@ import (
 	"time"
 	"strings"
 	"os"
+	imgc "presidential-simulator/internal/ondemand_image_client"
 )
 
 // WebServer handles HTTP requests for the Presidential Simulator
 type WebServer struct {
 	orchestrator *GameOrchestrator
 	port         string
+}
+
+// ChatMessage is a UI-friendly message item for the client feed
+type ChatMessage struct {
+	Name           string `json:"name"`
+	Text           string `json:"text"`
+	Title          string `json:"title"`
+	TitleColor     string `json:"titleColor"`
+	Time           string `json:"time"`
+	ProfilePicture string `json:"profilePicture"`
 }
 
 // GameStateResponse represents the current game state for the frontend
@@ -31,13 +42,14 @@ type GameStateResponse struct {
 
 // NewRoundResponse is returned by the NewRound endpoint
 type NewRoundResponse struct {
-	GameOver   bool         `json:"gameOver"`
-	Turn       int          `json:"turn"`
-	MaxTurns   int          `json:"maxTurns"`
-	TurnResult *TurnResult  `json:"turnResult,omitempty"`
+	GameOver   bool          `json:"gameOver"`
+	Turn       int           `json:"turn"`
+	MaxTurns   int           `json:"maxTurns"`
+	TurnResult *TurnResult   `json:"turnResult,omitempty"`
 	Metrics    *WorldMetrics `json:"metrics,omitempty"`
-	Newspaper  string       `json:"newspaper,omitempty"`
-	Stats      AIUsageStats `json:"stats"`
+	Newspaper  string        `json:"newspaper,omitempty"`
+	Stats      AIUsageStats  `json:"stats"`
+	Messages   []ChatMessage `json:"messages,omitempty"`
 }
 
 // EvaluateResponse is returned by the EvaluatePlayersChoice endpoint
@@ -49,6 +61,7 @@ type EvaluateResponse struct {
 	Turn       int           `json:"turn"`
 	MaxTurns   int           `json:"maxTurns"`
 	Stats      AIUsageStats  `json:"stats"`
+	Messages   []ChatMessage `json:"messages,omitempty"`
 }
 
 // NewWebServer creates a new web server instance
@@ -75,6 +88,8 @@ func (ws *WebServer) Start() error {
 	http.HandleFunc("/api/evaluate-choice", ws.handleEvaluateChoice)
 	// Stats-only endpoint
 	http.HandleFunc("/api/stats", ws.handleStats)
+	// New: on-demand image generation for current event
+	http.HandleFunc("/api/generate-image", ws.handleGenerateImage)
 
 	log.Printf("🌐 Presidential Simulator server starting on http://localhost:%s", ws.port)
 	return http.ListenAndServe(":"+ws.port, nil)
@@ -258,6 +273,60 @@ func (ws *WebServer) handlePlayerChoice(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(response)
 }
 
+func colorForCategory(cat string) string {
+	switch strings.ToLower(cat) {
+	case "environment", "climate":
+		return "#2E8B57"
+	case "security", "military":
+		return "#B22222"
+	case "economy":
+		return "#DAA520"
+	case "diplomacy", "geopolitics":
+		return "#4682B4"
+	case "technology":
+		return "#7B68EE"
+	case "public_health":
+		return "#008080"
+	case "civil_rights":
+		return "#6A5ACD"
+	case "immigration":
+		return "#A0522D"
+	case "social_safety_net":
+		return "#FF8C00"
+	case "gun_policy":
+		return "#8B0000"
+	case "judicial_appointments":
+		return "#4B0082"
+	default:
+		return "#333333"
+	}
+}
+
+func colorForSpecialty(spec string) string {
+	switch strings.ToLower(spec) {
+	case "environment":
+		return "#2E8B57"
+	case "security", "military":
+		return "#B22222"
+	case "economy":
+		return "#DAA520"
+	case "diplomacy":
+		return "#4682B4"
+	case "tech", "technology":
+		return "#7B68EE"
+	case "social":
+		return "#FF8C00"
+	case "domestic":
+		return "#5F9EA0"
+	default:
+		return "#1E90FF"
+	}
+}
+
+func avatarURL(slug string) string {
+	return fmt.Sprintf("https://robohash.org/%s.png?size=64x64&set=set3", slug)
+}
+
 // handleNewRound returns event + advisors or newspaper if game is over
 func (ws *WebServer) handleNewRound(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -300,15 +369,46 @@ func (ws *WebServer) handleNewRound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Build message list: 1) Event message 2) Advisor messages
+	msgs := make([]ChatMessage, 0, 1+len(turnResult.Advisors))
+	now := time.Now().UTC().Format(time.RFC3339)
+	evt := turnResult.Event
+	msgs = append(msgs, ChatMessage{
+		Name:           "News Desk",
+		Text:           evt.Description,
+		Title:          evt.Title,
+		TitleColor:     colorForCategory(evt.Category),
+		Time:           now,
+		ProfilePicture: avatarURL("news"),
+	})
+	for _, a := range turnResult.Advisors {
+		msgs = append(msgs, ChatMessage{
+			Name:           a.AdvisorName,
+			Text:           a.Advice,
+			Title:          a.Title,
+			TitleColor:     colorForSpecialty(strings.ToLower(findAdvisorSpecialty(ws.orchestrator.sim.state.Advisors, a.AdvisorID))),
+			Time:           now,
+			ProfilePicture: avatarURL(a.AdvisorID),
+		})
+	}
+
 	resp := NewRoundResponse{
 		GameOver:   false,
 		Turn:       ws.orchestrator.sim.state.Turn,
 		MaxTurns:   ws.orchestrator.sim.state.MaxTurns,
 		TurnResult: turnResult,
 		Stats:      ws.orchestrator.sim.state.Stats,
+		Messages:   msgs,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func findAdvisorSpecialty(list []Advisor, id string) string {
+	for _, a := range list {
+		if a.ID == id { return a.Specialty }
+	}
+	return ""
 }
 
 // handleEvaluateChoice evaluates player's decision and returns evaluation + impact
@@ -352,6 +452,19 @@ func (ws *WebServer) handleEvaluateChoice(w http.ResponseWriter, r *http.Request
 	// Last history item has evaluation and impact
 	hist := ws.orchestrator.sim.state.History
 	last := hist[len(hist)-1]
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	msgs := []ChatMessage{
+		{
+			Name:           "Director",
+			Text:           last.Evaluation,
+			Title:          "Evaluation",
+			TitleColor:     "#333333",
+			Time:           now,
+			ProfilePicture: avatarURL("director"),
+		},
+	}
+
 	resp := EvaluateResponse{
 		Evaluation: last.Evaluation,
 		Impact:     last.Impact,
@@ -360,6 +473,7 @@ func (ws *WebServer) handleEvaluateChoice(w http.ResponseWriter, r *http.Request
 		Turn:       ws.orchestrator.sim.state.Turn,
 		MaxTurns:   ws.orchestrator.sim.state.MaxTurns,
 		Stats:      ws.orchestrator.sim.state.Stats,
+		Messages:   msgs,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
@@ -373,6 +487,43 @@ func (ws *WebServer) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ws.orchestrator.sim.state.Stats)
+}
+
+// handleGenerateImage generates a BBC/AP style image for the current event and returns the URL
+func (ws *WebServer) handleGenerateImage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	turn := ws.orchestrator.sim.state.CurrentTurn
+	if turn == nil {
+		http.Error(w, "no active turn", http.StatusBadRequest)
+		return
+	}
+	// Optional body: { width?: number, height?: number }
+	var req struct{ Width, Height int }
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	if req.Width <= 0 { req.Width = 800 }
+	if req.Height <= 0 { req.Height = 450 }
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	prompt := buildBBCPhotoPrompt(&turn.Event)
+	client := imgc.New()
+	url, err := client.Generate(ctx, prompt, req.Width, req.Height)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("image generation failed: %v", err), http.StatusBadGateway)
+		return
+	}
+	// Attach to current event
+	turn.Event.ImageURL = url
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"eventId": turn.Event.ID,
+		"imageUrl": url,
+	})
 }
 
 // buildEndgameNewspaper creates a simple newspaper-style summary of the run
