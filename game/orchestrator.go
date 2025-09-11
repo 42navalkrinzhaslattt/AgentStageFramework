@@ -463,6 +463,31 @@ func parseImpactLevelsFromText(text string) (map[string]ImpactDecision, bool) {
 		}
 	}
 
+	// NEW: robust fallback – scan for any balanced JSON object containing the key "impacts" (or "impact")
+	if frag, ok := findAnyBalancedJSONWithImpact(text); ok {
+		var obj map[string]any
+		if json.Unmarshal([]byte(frag), &obj) == nil {
+			var impactsRaw any
+			if v, ok := obj["impacts"]; ok { impactsRaw = v } else if v, ok := obj["impact"]; ok { impactsRaw = v }
+			if impactsRaw != nil {
+				if m, ok := impactsRaw.(map[string]any); ok {
+					res := map[string]ImpactDecision{}
+					for k, v := range m {
+						key := normalizeMetricKey(k)
+						mv, ok2 := v.(map[string]any)
+						if !ok2 { continue }
+						lvl, _ := mv["level"].(string)
+						dir, _ := mv["direction"].(string)
+						just, _ := mv["justification"].(string)
+						if lvl == "" || dir == "" { continue }
+						res[key] = ImpactDecision{Level: strings.ToLower(lvl), Direction: dir, Justification: just}
+					}
+					if len(res) > 0 { return res, true }
+				}
+			}
+		}
+	}
+
 	// Fallback: regex-based scan of JSON candidates (may fail on nested objects but useful as backup)
 	locs := jsonCandidateRE.FindAllStringIndex(text, -1)
 	for i := len(locs) - 1; i >= 0; i-- {
@@ -503,24 +528,28 @@ func extractImpactsJSON(s string) (string, bool) {
 	}
 	if open == -1 { return "", false }
 	// Scan forward to find the matching closing '}' with brace counting while respecting strings and escapes
-	depth := 0
-	inStr := false
-	esc := false
-	for i := open; i < len(s); i++ {
-		ch := s[i]
-		if inStr {
-			if esc { esc = false; continue }
-			if ch == '\\' { esc = true; continue }
-			if ch == '"' { inStr = false; continue }
-			continue
+	end, ok := matchBalancedClosingBrace(s, open)
+	if !ok { return "", false }
+	return s[open : end+1], true
+}
+
+// findAnyBalancedJSONWithImpact scans the entire string, and for each JSON object found (balanced braces),
+// returns the last one that contains the key "impacts" (or "impact").
+func findAnyBalancedJSONWithImpact(s string) (string, bool) {
+	lastFrag := ""
+	for i := 0; i < len(s); i++ {
+		if s[i] != '{' { continue }
+		end, ok := matchBalancedClosingBrace(s, i)
+		if !ok { continue }
+		frag := s[i : end+1]
+		lowFrag := strings.ToLower(frag)
+		if strings.Contains(lowFrag, "\"impacts\"") || strings.Contains(lowFrag, "\"impact\"") {
+			lastFrag = frag
 		}
-		if ch == '"' { inStr = true; continue }
-		if ch == '{' { depth++ }
-		if ch == '}' {
-			depth--
-			if depth == 0 { return s[open : i+1], true }
-		}
+		// continue scanning to prefer the last occurrence
+		i = end
 	}
+	if lastFrag != "" { return lastFrag, true }
 	return "", false
 }
 
@@ -686,17 +715,6 @@ Player's Chosen Action:
 	return strings.TrimSpace(analysis), imp, nil
 }
 
-// rewriteEventDescription converts the raw event description into a viral BREAKING NEWS style post
-func (g *GameOrchestrator) rewriteEventDescription(ctx context.Context, event GameEvent) (string, error) {
-	// Return free-form description without templating.
-	return event.Description, nil
-}
-
-func (g *GameOrchestrator) rewriteEventViaGemini(ctx context.Context, event GameEvent) (string, error) {
-	// Deprecated in free-form mode
-	return event.Description, nil
-}
-
 // Extracts text before the last JSON object in a string.
 func extractAnalysisText(s string) string {
 	s = strings.TrimSpace(s)
@@ -797,4 +815,29 @@ func formatDirectorNarrative(t *TurnResult, impact WorldMetrics) string {
 	reason := strings.TrimSpace(t.Choice.Reasoning)
 	if len(reason) > 220 { reason = reason[:220] + "..." }
 	return fmt.Sprintf("Action Analysis: In response to \"%s\" (%s, severity %d), the administration chose: %s.", t.Event.Title, t.Event.Category, t.Event.Severity, reason)
+}
+
+// matchBalancedClosingBrace returns the index of the matching '}' starting from an opening '{',
+// handling nested braces and JSON string literals with escapes.
+func matchBalancedClosingBrace(s string, start int) (int, bool) {
+	if start < 0 || start >= len(s) || s[start] != '{' { return -1, false }
+	depth := 0
+	inStr := false
+	esc := false
+	for i := start; i < len(s); i++ {
+		ch := s[i]
+		if inStr {
+			if esc { esc = false; continue }
+			if ch == '\\' { esc = true; continue }
+			if ch == '"' { inStr = false; continue }
+			continue
+		}
+		if ch == '"' { inStr = true; continue }
+		if ch == '{' { depth++ }
+		if ch == '}' {
+			depth--
+			if depth == 0 { return i, true }
+		}
+	}
+	return -1, false
 }
