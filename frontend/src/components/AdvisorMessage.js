@@ -17,13 +17,16 @@ const AdvisorMessageContainer = styled.div`
   flex: 1;
   min-width: 0;
   padding: 12px;
+  padding-top: 20px; /* room for top-right title */
   background: rgba(255, 255, 255, 0.05);
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(10px);
+  position: relative;
 
   @media (max-width: 768px) {
     padding: 8px;
+    padding-top: 18px;
   }
 `;
 
@@ -50,7 +53,7 @@ const AdvisorHeader = styled.div`
 const MessageHeader = styled.div`
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start; /* title moved to absolute top-right */
   margin-bottom: 4px;
 `;
 
@@ -74,12 +77,19 @@ const Timestamp = styled.div`
 `;
 
 const AdvisorTitle = styled.span`
-  color: ${(props) => props.color};
-  font-size: 13px;
-  font-weight: 400;
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  color: #8b98a5; /* fixed grey */
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
 
   @media (max-width: 768px) {
-    font-size: 12px;
+    font-size: 11px;
+    top: 6px;
+    right: 8px;
   }
 `;
 
@@ -199,11 +209,11 @@ function AdvisorMessage({ advisor, time }) {
         {getSpecialtyIcon(specialty)}
       </AdvisorAvatar>
       <AdvisorMessageContainer>
+        <AdvisorTitle>{advisorTitle}</AdvisorTitle>
         <MessageHeader>
           <NameSection>
             <AdvisorName color={nameColor}>{advisorName}</AdvisorName>
           </NameSection>
-          <AdvisorTitle color="#8b98a5">{advisorTitle}</AdvisorTitle>
         </MessageHeader>
         <AdvisorAdvice>{advice}</AdvisorAdvice>
         <Timestamp>{time}</Timestamp>
