@@ -15,6 +15,7 @@ const initialState = {
     approval: 0,
     stability: 0,
   },
+  lastImpact: null,
   currentTurn: null,
   history: [],
   advisors: [],
@@ -31,6 +32,29 @@ const initialState = {
   },
 };
 
+function toNumericTimestamp(ts, fallback) {
+  if (ts == null) return fallback;
+  if (typeof ts === "number") return ts;
+  if (typeof ts === "string") {
+    const n = Date.parse(ts);
+    return isNaN(n) ? fallback : n;
+  }
+  return fallback;
+}
+
+function normalizeMessages(messages) {
+  if (!Array.isArray(messages)) return [];
+  const base = Date.now();
+  return messages.map((m, idx) => {
+    const parsedTs = toNumericTimestamp(m.timestamp, base + idx);
+    return {
+      ...m,
+      isBot: m.isBot ?? true,
+      timestamp: parsedTs,
+    };
+  });
+}
+
 function gameReducer(state, action) {
   switch (action.type) {
     case "SET_LOADING":
@@ -46,28 +70,35 @@ function gameReducer(state, action) {
         loading: false,
         error: null,
       };
-    case "NEW_ROUND":
+    case "NEW_ROUND": {
+      const incoming = normalizeMessages(action.payload.messages);
+      const gameOver = !!action.payload.gameOver;
       return {
         ...state,
-        gameState: "playing",
+        gameState: gameOver ? "gameOver" : "playing",
+        isComplete: gameOver ? true : state.isComplete,
         turn: action.payload.turn,
         maxTurns: action.payload.maxTurns,
-        currentTurn: action.payload.turnResult,
+        currentTurn: gameOver ? null : action.payload.turnResult,
         metrics: action.payload.metrics || state.metrics,
+        lastImpact: null,
         stats: action.payload.stats,
-        messages: action.payload.messages ? [...state.messages, ...action.payload.messages] : state.messages,
+        messages: incoming.length ? [...state.messages, ...incoming] : state.messages,
         loading: false,
       };
-    case "EVALUATE_CHOICE":
+    }
+    case "EVALUATE_CHOICE": {
+      const incoming = normalizeMessages(action.payload.messages);
       return {
         ...state,
         gameState: action.payload.isComplete ? "gameOver" : "playing",
         metrics: action.payload.metrics,
+        lastImpact: action.payload.impact,
         isComplete: action.payload.isComplete,
         turn: action.payload.turn,
         maxTurns: action.payload.maxTurns,
         stats: action.payload.stats,
-        messages: action.payload.messages ? [...state.messages, ...action.payload.messages] : state.messages,
+        messages: incoming.length ? [...state.messages, ...incoming] : state.messages,
         history: [
           ...state.history,
           {
@@ -80,6 +111,15 @@ function gameReducer(state, action) {
         currentTurn: null,
         loading: false,
       };
+    }
+    case "APPEND_MESSAGES": {
+      const extra = normalizeMessages(action.payload || []);
+      if (!extra.length) return state;
+      return {
+        ...state,
+        messages: [...state.messages, ...extra],
+      };
+    }
     default:
       return state;
   }

@@ -119,102 +119,97 @@ var historicalTopicSeeds = []struct{Topic, Title, Desc string; Options []string}
 	{"judicial_appointments","Supreme Court Vacancy","An unexpected Supreme Court vacancy opens with razor-thin Senate margins and intense public scrutiny.",[]string{"Nominate a consensus moderate jurist","Nominate an ideologically aligned jurist to energize base","Delay nomination; pursue procedural deal","Consider recess appointment pathway"}},
 }
 
+// --- Named-entity injection to ensure exactly one proper name per event ---
+var usStates = []string{"Texas","California","Florida","Ohio","Arizona","Michigan","Georgia","Virginia","Pennsylvania","New York"}
+var countries = []string{"Poland","Turkey","Japan","Germany","France","Canada","Mexico","Brazil","India","South Korea"}
+var companies = []string{"NorthStar Energy","Orion Analytics","Pioneer Biotech","Apex Dynamics","BlueRidge Systems","Summit Aerospace","Cobalt Rail"}
+
+func pickOne(list []string) string { return list[rand.Intn(len(list))] }
+
+func textContainsAny(text string, names []string) bool {
+	lower := strings.ToLower(text)
+	for _, n := range names {
+		if strings.Contains(lower, strings.ToLower(n)) { return true }
+	}
+	return false
+}
+
+// injectSingleNamedEntity adds exactly one named entity (state, company, or foreign country)
+// into the event, preferring to annotate the title with "in/at NAME".
+// If the text already contains any of our known names, it will not add another.
+func injectSingleNamedEntity(topic, title, desc string) (string, string) {
+	combined := title + " " + desc
+	allNames := append(append([]string{}, usStates...), append(countries, companies...)...)
+	if textContainsAny(combined, allNames) {
+		return title, desc // already has a proper name; don't add more
+	}
+
+	var name, prep string
+	switch topic {
+	case "geopolitics", "military_intervention", "security":
+		name, prep = pickOne(countries), "in"
+	case "economy", "technology":
+		name, prep = pickOne(companies), "at"
+	case "environment", "public_health":
+		name, prep = pickOne(usStates), "in"
+	default:
+		name, prep = pickOne(usStates), "in"
+	}
+
+	// Only add to title to keep a single mention overall
+	if !strings.Contains(strings.ToLower(title), strings.ToLower(name)) {
+		title = fmt.Sprintf("%s %s %s", title, prep, name)
+	}
+	return title, desc
+}
+
 // GenerateTurnEvent now selects a random topic seed each turn.
 func (p *PresidentSim) GenerateTurnEvent(ctx context.Context) (*GameEvent, error) {
-	seed := historicalTopicSeeds[rand.Intn(len(historicalTopicSeeds))]
+	// Build a set of topics already used this game (full history + current)
+	used := map[string]bool{}
+	for _, t := range p.state.History {
+		used[strings.ToLower(t.Event.Category)] = true
+	}
+	if p.state.CurrentTurn != nil {
+		used[strings.ToLower(p.state.CurrentTurn.Event.Category)] = true
+	}
+
+	// Collect candidates that have not been used yet
+	remaining := make([]struct{ Topic, Title, Desc string; Options []string }, 0, len(historicalTopicSeeds))
+	for _, s := range historicalTopicSeeds {
+		if !used[strings.ToLower(s.Topic)] {
+			remaining = append(remaining, s)
+		}
+	}
+
+	var seed struct{ Topic, Title, Desc string; Options []string }
+	if len(remaining) > 0 {
+		seed = remaining[rand.Intn(len(remaining))]
+	} else {
+		// All topics exhausted (e.g., MaxTurns > unique topics); fallback to any
+		seed = historicalTopicSeeds[rand.Intn(len(historicalTopicSeeds))]
+	}
+
 	id := fmt.Sprintf("evt_%s_%d", seed.Topic, time.Now().UnixNano())
 	sev := 5 + rand.Intn(5)
 	// Slight variation injection
-	variant := []string{"Analysts warn second-order impacts may cascade.","Media narratives are diverging, amplifying uncertainty.","Internal brief suggests window for decisive framing.","Advisory councils urge calibrated but swift response."}[rand.Intn(4)]
+	variant := []string{"Analysts warn second-order impacts may cascade.", "Media narratives are diverging, amplifying uncertainty.", "Internal brief suggests window for decisive framing.", "Advisory councils urge calibrated but swift response."}[rand.Intn(4)]
 	desc := fmt.Sprintf("%s %s", seed.Desc, variant)
 
-	// NEW: Pre-format into BREAKING NEWS style at generation time
-	title, formatted := formatBreakingNewsPost(seed.Title, seed.Topic, sev, desc)
-	evt := &GameEvent{ID:id, Title:title, Description:formatted, Category:seed.Topic, Severity:sev, Options: seed.Options}
+	// Add exactly one named entity suited to the topic
+	title := seed.Title
+	title, desc = injectSingleNamedEntity(seed.Topic, title, desc)
 
-	// Kick off async image generation with BBC-style photojournalistic prompt
+	// Use free-form seed title and description (no templated BREAKING format)
+	evt := &GameEvent{ID: id, Title: title, Description: desc, Category: seed.Topic, Severity: sev, Options: seed.Options}
+
+	// Kick off async image generation
 	go p.enqueueEventImage(context.Background(), evt)
 
 	return evt, nil
 }
 
 func severityLabel(s int) string { switch { case s>=8: return "high"; case s>=6: return "moderate"; default: return "low" } }
-
-// formatBreakingNewsPost produces a viral BREAKING NEWS style post without model calls
-func formatBreakingNewsPost(title, category string, severity int, baseDesc string) (string, string) {
-	upper := strings.ToUpper(title)
-	headline := "🚨 BREAKING: " + upper
-
-	// Pick an entity name deterministically by category
-	entity := map[string]string{
-		"technology":           "AegisNet",
-		"economy":              "Capstone Energy",
-		"environment":          "Coastal Resilience Authority",
-		"public_health":        "Sterling Biolabs",
-		"security":             "Homeland Cyber Command",
-		"geopolitics":          "Atlantic Council Desk",
-		"diplomacy":            "Atlantic Council Desk",
-		"immigration":          "Border Operations Directorate",
-		"civil_rights":         "Liberty Watch Coalition",
-		"military_intervention": "Joint Operations Center",
-		"social_safety_net":    "National Benefits Agency",
-		"gun_policy":           "Federal Safety Commission",
-		"judicial_appointments": "Senate Judiciary Staff",
-	}[strings.ToLower(category)]
-	if entity == "" { entity = "National Response Center" }
-
-	// On-the-ground consequences by category
-	onGround := map[string]string{
-		"technology":            "Payment rails stall, transit apps fail, call centers flooded.",
-		"economy":               "Prices spike, freight queues grow, small businesses pause orders.",
-		"environment":           "Coastal defenses overwhelmed, evacuations and sandbag lines form.",
-		"public_health":         "Clinics crowd, pharmacies ration, local schools reassess schedules.",
-		"security":              "Agencies shift to high alert; federal networks segment and harden.",
-		"geopolitics":           "Airspace notices change, insurers reprice risk, embassies restrict movement.",
-		"diplomacy":             "Airspace notices change, insurers reprice risk, embassies restrict movement.",
-		"immigration":           "Shelters overflow; buses rerouted; city resources stretched thin.",
-		"civil_rights":          "Courthouses packed; rallies surge; legal hotlines spike calls.",
-		"military_intervention": "Runways light up; tankers launch; allied press briefings multiply.",
-		"social_safety_net":     "Benefits portals jam; food banks surge; city councils call emergencies.",
-		"gun_policy":            "Vigils form; police presence expands; cable panels go wall-to-wall.",
-		"judicial_appointments": "Advocacy groups mobilize; Senate corridors teem; fundraising explodes.",
-	}[strings.ToLower(category)]
-	if onGround == "" { onGround = "Systems strain and local responders scramble as uncertainty grows." }
-
-	// Official vs rumor framing
-	official := "officials call it a 'technical issue'"
-	rumor := "early intel hints at a coordinated operation"
-	switch strings.ToLower(category) {
-	case "technology", "security":
-		official = "providers cite a 'software glitch'"
-		rumor = "sources fear a foreign cyber operation"
-	case "environment":
-		official = "agencies cite 'anomalous weather'"
-		rumor = "leaked memos point to neglected defenses"
-	case "public_health":
-		official = "health brief calls it 'contained'"
-		rumor = "labs whisper novel mutations and undercounts"
-	case "economy":
-		official = "Treasury frames a 'temporary dislocation'"
-		rumor = "traders cite deeper structural fractures"
-	case "civil_rights":
-		official = "courts urge patience"
-		rumor = "advocates allege coordinated suppression"
-	case "immigration":
-		official = "DHS says 'surge protocols active'"
-		rumor = "border agents cite policy whiplash and gaps"
-	}
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "🧭 What’s Happening: %s (severity %d/10).\n\n", baseDesc, severity)
-	fmt.Fprintf(&b, "🌐 On The Ground: %s\n\n", onGround)
-	fmt.Fprintf(&b, "🏢 Named Entity: %s is central to unfolding operations.\n\n", entity)
-	fmt.Fprintf(&b, "🗣️ Official vs Rumors: %s, but %s.\n\n", official, rumor)
-	b.WriteString("🏛️ Politics: The White House is in crisis mode; opponents blame the administration for unforced errors. All eyes are on the President to act next.\n\n")
-	// Removed image placeholder and hashtags
-
-	return headline, strings.TrimSpace(b.String())
-}
 
 // enqueueEventImage builds a news-photo style prompt and requests an image; stores URL on the event when available
 func (p *PresidentSim) enqueueEventImage(ctx context.Context, evt *GameEvent) {
@@ -232,5 +227,5 @@ func (p *PresidentSim) enqueueEventImage(ctx context.Context, evt *GameEvent) {
 
 // buildBBCPhotoPrompt creates the requested BBC/AP style prompt with the event details
 func buildBBCPhotoPrompt(evt *GameEvent) string {
-	return fmt.Sprintf("Create a BBC-style, photojournalistic, realistic image capturing the essence of the following event:\n\nTitle: %s\nCategory: %s (Severity %d/10)\nDetails: %s\n\nStylistic Directives:\n\nSource Style: BBC News / Associated Press photojournalism.\n\nRealism: High-resolution, photorealistic. The image should look like it was taken by a professional news photographer on-site.\n\nComposition: A well-composed shot (medium or medium-wide angle) that tells a story, focusing on the human element and the context of the event. Avoid overly staged or synthetic looks.\n\nLighting: Natural and authentic lighting that fits the scene (e.g., daylight through windows for an indoor event, overcast sky for an outdoor public gathering).\n\nAtmosphere: Capture the genuine mood of the event. For a generous event, focus on expressions of gratitude, quiet dignity, and community solidarity. Avoid exaggerated emotions.\n\nCamera: Emulate a shot from a professional DSLR camera with a standard lens (e.g., 35mm or 50mm).", evt.Title, evt.Category, evt.Severity, evt.Description)
+	return fmt.Sprintf("Create a BBC-style, photojournalistic, realistic image capturing the essence of the following event:\n\nTitle: %s\nCategory: %s (Severity %d/10)\nDetails: %s\n\nStylistic Directives:\n\nSource Style: BBC News / Associated Press photojournalism.\n\nRealism: High-resolution, photorealistic. The image should look like it was taken by a professional news photographer on-site.\n\nComposition: Use an establishing or medium-wide shot that emphasizes situational context — locations, infrastructure, equipment, signage, maps, or landscapes relevant to the event. Avoid close-ups of people and avoid prominent faces.\n\nLighting: Natural and authentic lighting that fits the scene (e.g., daylight through windows for an indoor event, overcast sky for an outdoor public gathering).\n\nAtmosphere: Emphasize the operational/environmental context and factual setting; avoid dramatization or exaggerated emotions.\n\nCamera: Emulate a shot from a professional DSLR camera with a standard lens (e.g., 35mm or 50mm). Include recognizable contextual markers where appropriate (e.g., border checkpoints, government buildings, data centers, coastal defenses).", evt.Title, evt.Category, evt.Severity, evt.Description)
 }

@@ -126,7 +126,7 @@ function MessageInput({
   onChange,
   onKeyPress,
   onSend,
-  placeholder = "Напишите сообщение...",
+  placeholder = "Type a message...",
   disabled = false,
   textareaRef,
 }) {

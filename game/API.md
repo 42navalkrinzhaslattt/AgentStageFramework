@@ -12,7 +12,7 @@ Status codes:
 
 Environment prerequisites (server side):
 - Text models: ON_DEMAND_API_ACCESS_TOKEN (or THETA_API_KEY), GOOGLE_AI_API_KEY (fallback)
-- Image models: ON_DEMAND_API_ACCESS_TOKEN (Flux). Fallback to Google Imagen uses GOOGLE_AI_API_KEY
+- Image models: ON_DEMAND_API_ACCESS_TOKEN (Flux). Fallback to Google Gemini image generation (gemini-2.0-flash-preview-image-generation) uses GOOGLE_AI_API_KEY or GEMINI_API_KEY.
 
 ---
 
@@ -133,7 +133,7 @@ curl -sS http://localhost:8080/api/stats
 ---
 
 ## POST /api/generate-image
-Generate an illustrative image for the current event. Returns a hosted URL (Flux) or a data URL (Imagen fallback).
+Generate an illustrative image for the current event. Returns a hosted URL (Flux) or a data URL (Gemini fallback).
 
 Request body (optional):
 - { "width": number, "height": number }
@@ -148,7 +148,7 @@ curl -sS -X POST http://localhost:8080/api/generate-image -H 'Content-Type: appl
 
 Notes:
 - Requires an active turn (start + new-round first)
-- If Flux fails or no Theta token, falls back to Google Imagen and returns a data:image/...;base64,... URL
+- If Flux fails or no Theta token, falls back to Google Gemini image generation and returns a data:image/...;base64,... URL.
 
 ---
 

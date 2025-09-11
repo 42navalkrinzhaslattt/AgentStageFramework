@@ -7,7 +7,6 @@ import AdvisorPanel from "./AdvisorPanel";
 import ChoicePanel from "./ChoicePanel";
 import LoadingSpinner from "./LoadingSpinner";
 import MessageInput from "./MessageInput";
-import AdvisorMessage from "./AdvisorMessage";
 import MessageComponent from "./Message";
 
 const TelegramContainer = styled.div`
@@ -223,6 +222,7 @@ function GameBoard() {
     messages: apiMessages,
     newRound,
     evaluateChoice,
+    lastImpact,
   } = useGame();
 
   const [gamePhase, setGamePhase] = useState(GamePhase.WAITING_FOR_EVENT);
@@ -242,7 +242,7 @@ function GameBoard() {
       text,
       isBot,
       timestamp: now,
-      time: new Date().toLocaleTimeString("ru-RU", {
+      time: new Date(now).toLocaleTimeString("ru-RU", {
         hour: "2-digit",
         minute: "2-digit",
       }),
@@ -396,8 +396,8 @@ function GameBoard() {
       <MessagesArea>
         {[...(apiMessages || []).map(msg => ({...msg, type: 'message'})), ...(userMessages || []).map(msg => ({...msg, type: 'user'}))]
           .sort((a, b) => {
-            const timeA = a.timestamp || 0;
-            const timeB = b.timestamp || 0;
+            const timeA = typeof a.timestamp === 'string' ? Date.parse(a.timestamp) : (a.timestamp || 0);
+            const timeB = typeof b.timestamp === 'string' ? Date.parse(b.timestamp) : (b.timestamp || 0);
             return timeA - timeB;
           })
           .map((item) => {
@@ -408,7 +408,7 @@ function GameBoard() {
                   message={item.text || item.content}
                   isSystem={item.isBot || item.role === 'system'}
                   time={item.timestamp || Date.now()}
-                  name={item.name}
+                  name={item.name || ""}
                   title={item.title}
                   titleColor={item.titleColor}
                   profilePicture={item.profilePicture}
@@ -416,10 +416,16 @@ function GameBoard() {
               );
             } else {
               return (
-                <AdvisorMessage
+                <MessageComponent
                   key={item.id}
-                  advisor={item}
-                  time={item.time}
+                  message={item.text}
+                  isSystem={false}
+                  isPlayer={true}
+                  time={item.timestamp || Date.now()}
+                  name={"President"}
+                  title={""}
+                  titleColor={"#8b98a5"}
+                  profilePicture={"🇺🇸"}
                 />
               );
             }
