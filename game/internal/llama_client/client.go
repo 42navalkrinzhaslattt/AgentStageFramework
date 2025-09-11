@@ -21,7 +21,7 @@ type Client struct {
 func New() *Client {
 	base := os.Getenv("LLAMA_CHAT_URL")
 	if base == "" {
-		base = "https://ondemand.thetaedgecloud.com/infer_request/llama_3_1_70b/completions"
+		base = "https://llama3170b2oczc2osyg-07554694ea35fad5.tec-s20.onthetaedgecloud.com/v1/chat/completions"
 	}
 	key := os.Getenv("ON_DEMAND_API_ACCESS_TOKEN")
 	if key == "" {
