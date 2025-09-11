@@ -265,8 +265,8 @@ Event: %s
 Category: %s Severity: %d/10
 Description: %s
 Task: Provide one concise, actionable advisory opinion (policy recommendation or strategic action).
-Style and Voice: Address the President directly using second-person ("you", "your"); do not refer to the President in third person. No self-reference (avoid "I", "we").
-Constraints: 2-4 sentences. No internal reasoning, no preamble.
+Style and Voice: Address the President directly using second-person ("you", "your"). Use simple, everyday language (about 8th-grade reading level). Avoid jargon and buzzwords.
+Constraints: 1-2 short sentences. No internal reasoning, no preamble, no self-reference (avoid "I", "we").
 Output ONLY valid JSON: {"advisor_opinion":"<your concise advisory>"}
 If unsure, still give best judgment.`,
 			persona, event.Title, event.Category, event.Severity, event.Description)
@@ -676,10 +676,10 @@ func (g *GameOrchestrator) directorMetricsViaGemini(ctx context.Context, t *Turn
 		return "", WorldMetrics{}, errors.New("GOOGLE_AI_API_KEY not set")
 	}
 	pp := fmt.Sprintf(`Event Evaluation Prompt
-You are an expert political and economic analyst AI. Evaluate the player's action for its impact on game metrics.
+You are an experienced policy analyst. Explain in simple, everyday language.
 
 Provide:
-1) Action Analysis: 2–4 concise sentences.
+1) Action Analysis: 1–2 short sentences. Keep it clear and conversational. No jargon.
 2) A final single-line JSON object with categorical impact levels and directions per metric. Use exactly this schema keys and ranges:
 {"impacts":{
   "economy":{"level":"low|medium|high|extreme","direction":"+|-|0","justification":"<why>"},
@@ -813,8 +813,8 @@ No markdown.`, advisor.Name, advisor.Title, event.Title, event.Category, event.S
 // formatDirectorNarrative builds a concise analysis header when model analysis text is empty.
 func formatDirectorNarrative(t *TurnResult, impact WorldMetrics) string {
 	reason := strings.TrimSpace(t.Choice.Reasoning)
-	if len(reason) > 220 { reason = reason[:220] + "..." }
-	return fmt.Sprintf("Action Analysis: In response to \"%s\" (%s, severity %d), the administration chose: %s.", t.Event.Title, t.Event.Category, t.Event.Severity, reason)
+	if len(reason) > 160 { reason = reason[:160] + "..." }
+	return fmt.Sprintf("Action analysis: You chose: %s. Event: %s (%s, %d/10).", reason, t.Event.Title, t.Event.Category, t.Event.Severity)
 }
 
 // matchBalancedClosingBrace returns the index of the matching '}' starting from an opening '{',

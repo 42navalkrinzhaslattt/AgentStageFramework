@@ -193,7 +193,7 @@ func (p *PresidentSim) GenerateTurnEvent(ctx context.Context) (*GameEvent, error
 	id := fmt.Sprintf("evt_%s_%d", seed.Topic, time.Now().UnixNano())
 	sev := 5 + rand.Intn(5)
 	// Slight variation injection
-	variant := []string{"Analysts warn second-order impacts may cascade.", "Media narratives are diverging, amplifying uncertainty.", "Internal brief suggests window for decisive framing.", "Advisory councils urge calibrated but swift response."}[rand.Intn(4)]
+	variant := []string{"People are unsure what happens next.", "News reports disagree on what's going on.", "An internal note says we should move quickly but carefully.", "Advisors say we should act soon, but not rush."}[rand.Intn(4)]
 	desc := fmt.Sprintf("%s %s", seed.Desc, variant)
 
 	// Add exactly one named entity suited to the topic
@@ -227,5 +227,5 @@ func (p *PresidentSim) enqueueEventImage(ctx context.Context, evt *GameEvent) {
 
 // buildBBCPhotoPrompt creates the requested BBC/AP style prompt with the event details
 func buildBBCPhotoPrompt(evt *GameEvent) string {
-	return fmt.Sprintf("Create a BBC-style, photojournalistic, realistic image capturing the essence of the following event:\n\nTitle: %s\nCategory: %s (Severity %d/10)\nDetails: %s\n\nStylistic Directives:\n\nSource Style: BBC News / Associated Press photojournalism.\n\nRealism: High-resolution, photorealistic. The image should look like it was taken by a professional news photographer on-site.\n\nComposition: Use an establishing or medium-wide shot that emphasizes situational context — locations, infrastructure, equipment, signage, maps, or landscapes relevant to the event. Avoid close-ups of people and avoid prominent faces.\n\nLighting: Natural and authentic lighting that fits the scene (e.g., daylight through windows for an indoor event, overcast sky for an outdoor public gathering).\n\nAtmosphere: Emphasize the operational/environmental context and factual setting; avoid dramatization or exaggerated emotions.\n\nCamera: Emulate a shot from a professional DSLR camera with a standard lens (e.g., 35mm or 50mm). Include recognizable contextual markers where appropriate (e.g., border checkpoints, government buildings, data centers, coastal defenses).", evt.Title, evt.Category, evt.Severity, evt.Description)
+	return fmt.Sprintf("Create a realistic news photo of this event. Keep it neutral and grounded.\n\nTitle: %s\nCategory: %s (Severity %d/10)\nDetails: %s\n\nStyle:\n- Photojournalism look (BBC/AP).\n- Realistic lighting.\n- Show the place and context (signs, buildings, equipment).\n- Medium-wide shot. Avoid close-ups of faces.\n- Professional camera look (35–50mm).", evt.Title, evt.Category, evt.Severity, evt.Description)
 }
