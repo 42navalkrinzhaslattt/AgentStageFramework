@@ -10,24 +10,26 @@ const GameOverContainer = styled.div`
   min-height: 100vh;
   padding: 2rem;
   text-align: center;
+  background: radial-gradient(60% 80% at 50% 20%, rgba(13, 71, 161, 0.35), rgba(10, 25, 47, 0.9)), #0a192f;
+  color: #e3f2fd;
 `;
 
 const Title = styled.h1`
   font-size: 3rem;
   margin-bottom: 1rem;
-  background: linear-gradient(45deg, #ffd700, #ffed4e);
+  background: linear-gradient(45deg, #4fc3f7, #0288d1);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+  text-shadow: 2px 2px 12px rgba(2, 136, 209, 0.2);
 `;
 
 const ResultsContainer = styled.div`
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(13, 71, 161, 0.15);
   border-radius: 20px;
   padding: 2rem;
   backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  max-width: 800px;
+  border: 1px solid rgba(79, 195, 247, 0.25);
+  max-width: 900px;
   width: 100%;
   margin-bottom: 2rem;
 `;
@@ -40,10 +42,11 @@ const MetricsGrid = styled.div`
 `;
 
 const MetricCard = styled.div`
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(79, 195, 247, 0.08);
   border-radius: 10px;
   padding: 1rem;
   text-align: center;
+  border: 1px solid rgba(79, 195, 247, 0.18);
 `;
 
 const MetricIcon = styled.div`
@@ -53,8 +56,9 @@ const MetricIcon = styled.div`
 
 const MetricName = styled.div`
   font-size: 0.9rem;
-  opacity: 0.8;
+  opacity: 0.9;
   margin-bottom: 0.5rem;
+  color: #bbdefb;
 `;
 
 const MetricValue = styled.div`
@@ -63,36 +67,20 @@ const MetricValue = styled.div`
   color: ${(props) => getMetricColor(props.value)};
 `;
 
-const StatsSection = styled.div`
-  margin-bottom: 2rem;
-`;
-
-const StatsTitle = styled.h3`
-  color: #ffd700;
-  margin-bottom: 1rem;
-`;
-
-const StatItem = styled.div`
-  display: flex;
-  justify-content: space-between;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-`;
-
 const HistorySection = styled.div`
   text-align: left;
-  max-height: 300px;
+  max-height: 340px;
   overflow-y: auto;
 `;
 
 const HistoryTitle = styled.h3`
-  color: #ffd700;
+  color: #4fc3f7;
   margin-bottom: 1rem;
   text-align: center;
 `;
 
 const HistoryItem = styled.div`
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(79, 195, 247, 0.06);
   border-radius: 8px;
   padding: 1rem;
   margin-bottom: 1rem;
@@ -101,7 +89,7 @@ const HistoryItem = styled.div`
 
 const TurnNumber = styled.div`
   font-weight: bold;
-  color: #ffd700;
+  color: #81d4fa;
   margin-bottom: 0.5rem;
 `;
 
@@ -112,12 +100,13 @@ const EventTitle = styled.div`
 
 const PlayerChoice = styled.div`
   font-style: italic;
-  opacity: 0.8;
+  opacity: 0.9;
   margin-bottom: 0.5rem;
+  color: #b3e5fc;
 `;
 
 const RestartButton = styled.button`
-  background: linear-gradient(45deg, #4caf50, #45a049);
+  background: linear-gradient(45deg, #42a5f5, #1e88e5);
   border: none;
   color: white;
   padding: 1rem 2rem;
@@ -125,34 +114,34 @@ const RestartButton = styled.button`
   border-radius: 50px;
   cursor: pointer;
   transition: all 0.3s ease;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 6px 20px rgba(2, 136, 209, 0.35);
 
   &:hover {
     transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 10px 28px rgba(2, 136, 209, 0.5);
   }
 `;
 
 function getMetricColor(value) {
-  if (value >= 50) return "#4CAF50";
-  if (value >= 20) return "#8BC34A";
-  if (value >= -20) return "#FFC107";
-  if (value >= -50) return "#FF9800";
-  return "#F44336";
+  if (value >= 50) return "#81C784"; // soft green
+  if (value >= 20) return "#AED581";
+  if (value >= -20) return "#FFEE58"; // yellow
+  if (value >= -50) return "#FFB74D"; // orange
+  return "#E57373"; // soft red
 }
 
 function getCategoryColor(category) {
   const colors = {
-    economy: "#4CAF50",
-    security: "#F44336",
-    diplomacy: "#2196F3",
-    environment: "#8BC34A",
-    domestic: "#FF9800",
-    military: "#9C27B0",
-    social: "#00BCD4",
-    tech: "#607D8B",
+    economy: "#26A69A",
+    security: "#42A5F5",
+    diplomacy: "#5C6BC0",
+    environment: "#66BB6A",
+    domestic: "#29B6F6",
+    military: "#7E57C2",
+    social: "#26C6DA",
+    tech: "#90A4AE",
   };
-  return colors[category] || "#757575";
+  return colors[category] || "#4FC3F7";
 }
 
 function getMetricIcon(metric) {
@@ -180,7 +169,7 @@ function getMetricName(metric) {
 }
 
 function GameOverScreen({ onRestart }) {
-  const { metrics, history, stats, turn, maxTurns } = useGame();
+  const { metrics, history, turn, maxTurns, startGame } = useGame();
   const [overallScore, setOverallScore] = useState(0);
 
   useEffect(() => {
@@ -200,6 +189,15 @@ function GameOverScreen({ onRestart }) {
   };
 
   const performance = getPerformanceText(overallScore);
+  const shownTurn = Math.min(turn, maxTurns);
+
+  const handleRestart = async () => {
+    try {
+      await startGame();
+    } catch (e) {
+      // no-op
+    }
+  };
 
   return (
     <GameOverContainer>
@@ -208,7 +206,7 @@ function GameOverScreen({ onRestart }) {
       <ResultsContainer>
         <div style={{ marginBottom: "2rem", textAlign: "center" }}>
           <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>
-            Turns completed: {turn} of {maxTurns}
+            Turns completed: {shownTurn} of {maxTurns}
           </div>
           <div
             style={{
@@ -219,7 +217,7 @@ function GameOverScreen({ onRestart }) {
           >
             {performance.text}
           </div>
-          <div style={{ fontSize: "1.2rem", opacity: 0.8 }}>
+          <div style={{ fontSize: "1.2rem", opacity: 0.85 }}>
             Overall Score: {overallScore}
           </div>
         </div>
@@ -238,32 +236,6 @@ function GameOverScreen({ onRestart }) {
             ))}
         </MetricsGrid>
 
-        {stats && (
-          <StatsSection>
-            <StatsTitle>AI Usage Statistics</StatsTitle>
-            <StatItem>
-              <span>Advisors (Theta):</span>
-              <span>{stats.advisorTheta}</span>
-            </StatItem>
-            <StatItem>
-              <span>Advisors (Gemini):</span>
-              <span>{stats.advisorGemini}</span>
-            </StatItem>
-            <StatItem>
-              <span>Director (Theta):</span>
-              <span>{stats.directorTheta}</span>
-            </StatItem>
-            <StatItem>
-              <span>Director (Gemini):</span>
-              <span>{stats.directorGemini}</span>
-            </StatItem>
-            <StatItem>
-              <span>Rewriting (Gemini):</span>
-              <span>{stats.rewriteGemini}</span>
-            </StatItem>
-          </StatsSection>
-        )}
-
         {history && history.length > 0 && (
           <HistorySection>
             <HistoryTitle>Decision History</HistoryTitle>
@@ -271,9 +243,11 @@ function GameOverScreen({ onRestart }) {
               <HistoryItem key={index} category={turn.event?.category}>
                 <TurnNumber>Turn {turn.turn}</TurnNumber>
                 <EventTitle>{turn.event?.title}</EventTitle>
-                <PlayerChoice>Choice: {turn.choice?.option}</PlayerChoice>
+                <PlayerChoice>
+                  Choice: {turn.choice?.reasoning || turn.choice?.option}
+                </PlayerChoice>
                 {turn.evaluation && (
-                  <div style={{ fontSize: "0.9rem", opacity: 0.8 }}>
+                  <div style={{ fontSize: "0.9rem", opacity: 0.9 }}>
                     {turn.evaluation}
                   </div>
                 )}
@@ -283,7 +257,7 @@ function GameOverScreen({ onRestart }) {
         )}
       </ResultsContainer>
 
-      <RestartButton onClick={onRestart}>Start New Game</RestartButton>
+      <RestartButton onClick={onRestart || handleRestart}>Start New Game</RestartButton>
     </GameOverContainer>
   );
 }

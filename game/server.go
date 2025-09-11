@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"math/rand"
 	"net/http"
 	"time"
 	"strings"
 	"os"
+	"regexp"
 	imgc "presidential-simulator/internal/ondemand_image_client"
 )
 
@@ -386,26 +388,41 @@ func (ws *WebServer) handleNewRound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build message list: 1) Event message 2) Advisor messages
+	// Best-effort: if no image yet, generate one now so it can be embedded in the event message
+	if strings.TrimSpace(turnResult.Event.ImageURL) == "" {
+		client := imgc.New()
+		if url, err := client.Generate(ctx, buildBBCPhotoPrompt(&turnResult.Event), 800, 450); err == nil && strings.TrimSpace(url) != "" {
+			turnResult.Event.ImageURL = url
+		} else if err != nil {
+			log.Printf("[IMAGE] sync generation failed: %v", err)
+		}
+	}
+
+	// Build message list: 1) Event message (with optional image) 2) Advisor messages
 	msgs := make([]ChatMessage, 0, 1+len(turnResult.Advisors))
 	baseTime := time.Now().UTC()
-	timestamp := baseTime.Unix()
+	timestamp := baseTime.UnixMilli()
 	
 	evt := turnResult.Event
+	// Compose event message with embedded image if present
+	eventText := fmt.Sprintf("**%s**\n\n%s", evt.Title, evt.Description)
+	if strings.TrimSpace(evt.ImageURL) != "" {
+		eventText = fmt.Sprintf("**%s**\n\n%s\n\n![Event image](%s)", evt.Title, evt.Description, evt.ImageURL)
+	}
 	msgs = append(msgs, ChatMessage{
 		ID:             fmt.Sprintf("event_%d_%d", ws.orchestrator.sim.state.Turn, timestamp),
-		Name:           "News Desk",
-		Text:           evt.Description,
-		Title:          evt.Title,
+		Name:           "", // no sender shown
+		Text:           eventText,
+		Title:          "", // no role/title
 		TitleColor:     colorForCategory(evt.Category),
 		Time:           baseTime.Format(time.RFC3339),
 		Timestamp:      timestamp,
-		ProfilePicture: avatarURL("news"),
+		ProfilePicture: "", // no avatar
 	})
 	
 	for i, a := range turnResult.Advisors {
 		advisorTime := baseTime.Add(time.Duration(i+1) * time.Second)
-		advisorTimestamp := advisorTime.Unix()
+		advisorTimestamp := advisorTime.UnixMilli()
 		msgs = append(msgs, ChatMessage{
 			ID:             fmt.Sprintf("advisor_%s_%d_%d", a.AdvisorID, ws.orchestrator.sim.state.Turn, advisorTimestamp),
 			Name:           a.AdvisorName,
@@ -423,6 +440,7 @@ func (ws *WebServer) handleNewRound(w http.ResponseWriter, r *http.Request) {
 		Turn:       ws.orchestrator.sim.state.Turn,
 		MaxTurns:   ws.orchestrator.sim.state.MaxTurns,
 		TurnResult: turnResult,
+		Metrics:    &ws.orchestrator.sim.state.Metrics, // include current metrics
 		Stats:      ws.orchestrator.sim.state.Stats,
 		Messages:   msgs,
 	}
@@ -480,22 +498,63 @@ func (ws *WebServer) handleEvaluateChoice(w http.ResponseWriter, r *http.Request
 	last := hist[len(hist)-1]
 
 	evalTime := time.Now().UTC()
-	evalTimestamp := evalTime.Unix()
+	evalTimestamp := evalTime.UnixMilli()
+
+	// Build a metrics line showing current value with delta in brackets, omit brackets if zero
+	impact := last.Impact
+	curr := ws.orchestrator.sim.state.Metrics
+	fmtMetric := func(val, delta float64) string {
+		v := int(math.Round(val))
+		d := int(math.Round(delta))
+		if d == 0 { return fmt.Sprintf("%d", v) }
+		sign := ""
+		if d > 0 { sign = "+" }
+		return fmt.Sprintf("%d(%s%d)", v, sign, d)
+	}
+	metricsLine := fmt.Sprintf("📈 Economy %s | 🛡️ Security %s | 🤝 Diplomacy %s | 🌱 Environment %s | 👍 Approval %s | 🏛️ Stability %s",
+		fmtMetric(curr.Economy, impact.Economy),
+		fmtMetric(curr.Security, impact.Security),
+		fmtMetric(curr.Diplomacy, impact.Diplomacy),
+		fmtMetric(curr.Environment, impact.Environment),
+		fmtMetric(curr.Approval, impact.Approval),
+		fmtMetric(curr.Stability, impact.Stability),
+	)
+
+	// Ensure evaluation text is short and JSON-free
+	shortEval := extractActionAnalysisText(last.Evaluation)
+	shortEval = firstNSentences(shortEval, 2)
+
+	msgText := fmt.Sprintf("%s\n\n%s", metricsLine, shortEval)
+
 	msgs := []ChatMessage{
 		{
 			ID:             fmt.Sprintf("evaluation_%d_%d", ws.orchestrator.sim.state.Turn, evalTimestamp),
-			Name:           "Director",
-			Text:           last.Evaluation,
-			Title:          "Evaluation",
+			Name:           "",
+			Text:           msgText,
+			Title:          "",
 			TitleColor:     "#333333",
 			Time:           evalTime.Format(time.RFC3339),
 			Timestamp:      evalTimestamp,
-			ProfilePicture: avatarURL("director"),
+			ProfilePicture: "",
 		},
 	}
 
+	// If game is complete after this move, append a concise system message and include newspaper
+	var newspaper string
+	if ws.orchestrator.IsGameComplete() {
+		msgs = append(msgs, ChatMessage{
+			ID:        fmt.Sprintf("system_gameover_%d", evalTimestamp),
+			Name:      "",
+			Text:      "🏁 Presidency terminated: a catastrophic decision ended the run.",
+			Title:     "",
+			Time:      evalTime.Format(time.RFC3339),
+			Timestamp: evalTimestamp + 1,
+		})
+		newspaper = buildEndgameNewspaper(ws.orchestrator.sim.state)
+	}
+
 	resp := EvaluateResponse{
-		Evaluation: last.Evaluation,
+		Evaluation: shortEval,
 		Impact:     last.Impact,
 		Metrics:    ws.orchestrator.sim.state.Metrics,
 		IsComplete: ws.orchestrator.IsGameComplete(),
@@ -503,6 +562,10 @@ func (ws *WebServer) handleEvaluateChoice(w http.ResponseWriter, r *http.Request
 		MaxTurns:   ws.orchestrator.sim.state.MaxTurns,
 		Stats:      ws.orchestrator.sim.state.Stats,
 		Messages:   msgs,
+	}
+	// If complete, also piggy-back a newspaper via a header for frontend to pick up (optional)
+	if newspaper != "" {
+		w.Header().Set("X-Newspaper", "1")
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
@@ -572,4 +635,19 @@ func buildEndgameNewspaper(state *GameState) string {
 	}
 	b.WriteString("— End of Term —\n")
 	return b.String()
+}
+
+var sentenceRE = regexp.MustCompile(`([^.?!]*[.?!])`)
+
+func firstNSentences(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if s == "" || n <= 0 { return "" }
+	parts := sentenceRE.FindAllString(s, n)
+	if len(parts) == 0 {
+		// No sentence terminators; return as-is (trim overly long text as a safety net)
+		if len(s) > 600 { return s[:600] }
+		return s
+	}
+	out := strings.TrimSpace(strings.Join(parts, " "))
+	return out
 }

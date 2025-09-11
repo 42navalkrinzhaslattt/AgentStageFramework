@@ -10,6 +10,15 @@ const Card = styled.div`
   margin-bottom: 1rem;
 `;
 
+const EventImage = styled.img`
+  width: 100%;
+  height: auto;
+  border-radius: 10px;
+  margin-bottom: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  display: block;
+`;
+
 const EventTitle = styled.h2`
   margin: 0 0 1rem 0;
   color: #ffd700;
@@ -145,6 +154,10 @@ function EventCard({ event, onChoiceSelect, selectedChoice, disabled }) {
           {event.severity}/10
         </span>
       </SeverityIndicator>
+
+      {event.imageUrl && (
+        <EventImage src={event.imageUrl} alt={event.title || "Event image"} />
+      )}
 
       <EventTitle>{event.title}</EventTitle>
       <EventDescription>{event.description}</EventDescription>
