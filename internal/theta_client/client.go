@@ -9,13 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime/multipart"
-	"net/http"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"time"
 	"log"
+	"net/http"
+	"os"
+	"strings"
+	"time"
 )
 
 const (
@@ -293,7 +291,7 @@ func (e *APIError) Error() string {
 // GenerateWithLLM sends a request to an LLM model
 func (c *ThetaClient) GenerateWithLLM(ctx context.Context, req *LLMRequest) (*LLMResponse, error) {
 	var endpoint string
-	if req.Model == "deepseek_r1" { endpoint = "https://ondemand.thetaedgecloud.com/infer_request/deepseek_r1/completions" } else if req.Model == "llama_3_1_70b" { endpoint = "https://ondemand.thetaedgecloud.com/infer_request/llama_3_1_70b/completions" } else { endpoint = fmt.Sprintf("%s/v1/inference/llm", c.baseURL) }
+	if req.Model == "deepseek_r1" { endpoint = "https://ondemand.thetaedgecloud.com/infer_request/deepseek_r1/completions" } else if req.Model == "llama_3_1_70b" { endpoint = "https://llama3170b2oczc2osyg-07554694ea35fad5.tec-s20.onthetaedgecloud.com/v1/chat/completions" } else { endpoint = fmt.Sprintf("%s/v1/inference/llm", c.baseURL) }
 	// DeepSeek custom handling
 	if req.Model == "deepseek_r1" || req.Model == "llama_3_1_70b" {
 		messages := []map[string]string{{"role":"system","content":"You are an adaptive strategic assistant."},{"role":"user","content":req.Prompt}}
@@ -435,7 +433,7 @@ func (c *ThetaClient) GenerateWithLLMStream(ctx context.Context, req *LLMRequest
 			if req.TopP > 0 { payload["input"].(map[string]interface{})["top_p"] = req.TopP }
 			jsonBody, e := json.Marshal(payload); if e != nil { errCh <- e; return }; body = bytes.NewReader(jsonBody)
 		} else if req.Model == "llama_3_1_70b" {
-			endpoint = "https://ondemand.thetaedgecloud.com/infer_request/llama_3_1_70b/completions?stream=true"
+			endpoint = "https://llama3170b2oczc2osyg-07554694ea35fad5.tec-s20.onthetaedgecloud.com/v1/chat/completions?stream=true"
 			messages := []map[string]string{{"role":"system","content":"You are an adaptive strategic assistant."},{"role":"user","content":req.Prompt}}
 			if req.MaxTokens == 0 { req.MaxTokens = fallbackDialogueMaxTokens }
 			payload := map[string]interface{}{"input": map[string]interface{}{"messages":messages,"max_tokens":req.MaxTokens,"temperature":req.Temperature,"stream":true}}
