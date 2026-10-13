@@ -119,3 +119,8 @@ config.local.json
 *.bak
 *.backup
 *~
+
+# Compiled game binaries (built by go build in game/ or make game-build)
+game/game
+game/presidential-simulator
+/presidential-sim

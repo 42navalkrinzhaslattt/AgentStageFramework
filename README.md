@@ -1,477 +1,157 @@
-# Emergent World Engine
+# AgentStage Framework (Emergent World Engine)
 
-A Go framework for building AI-driven games with intelligent NPCs, dynamic narratives, procedural assets, and strategic game direction. Simply import the package and start creating immersive game experiences powered by cutting-edge AI.
+A Go library for LLM-driven game characters and game direction, plus a turn-based Presidential Simulator built
+on it: a Go game server that runs AI advisors and AI evaluation on Theta EdgeCloud models with Gemini fallbacks,
+and a React chat frontend.
 
-## 🎯 Overview
+**Stack:** Go · Theta EdgeCloud (DeepSeek R1, Llama 3.1 70B, FLUX) · Google Gemini · Redis (optional) · React    **Context:** Team project with [mechitall](https://github.com/mechitall) and [madvil2](https://github.com/madvil2), September 2025
 
-The Emergent World E## 🔍 Framework Integration Patterns
+## Overview
 
-### Game Engine Integration
+The repository has two parts:
+
+- **`pkg/framework`**, the "Emergent World Engine": an in-process Go package (no separate services) that
+  wraps model calls in game-oriented types: `NPC`, `Director`, `Narrative` and `AssetGenerator`, all created from
+  one `Engine`.
+- **`game/`**, the Presidential Simulator: a separate Go module that imports the framework through a `replace`
+  directive. Each turn you get a crisis, three of eight advisors give one-line recommendations, you answer in free
+  text, and an LLM "director" scores the consequences on six metrics. It runs in the terminal or as an HTTP API
+  for the React app in `frontend/`.
+
+## How the simulator works
+
+**Turn loop** (`game/orchestrator.go`):
+
+1. **Event.** An event is picked from 12 hand-written topic seeds (border standoff, energy shock, cyber recon,
+   Supreme Court vacancy, ...), never repeating a topic within a game. One named entity (a US state, country or
+   fictional company, depending on the topic) is added to the title, plus a random severity of 5 to 9.
+2. **Event image.** Image generation starts in a goroutine with a photojournalism-style prompt. The client tries
+   Theta on-demand FLUX first (returns an image URL) and falls back to Gemini image generation, whose output is
+   converted to a WebP data URL.
+3. **Advisors.** Three of eight advisors are shuffled out and queried in parallel (one goroutine each, 35 s
+   timeout). Each must return `{"advisor_opinion": "..."}` from a Llama 3.1 70B endpoint on Theta EdgeCloud. The
+   output goes through layered extraction (last valid JSON block, then an "Advisor opinion:" line, then the first
+   paragraph that does not look like reasoning) and is rejected if it still contains brackets or braces. On
+   failure it falls back to Gemini 2.5 Flash Lite, and finally to a canned line.
+4. **Evaluation.** The player's free-text answer goes to the framework `Director` (DeepSeek R1 by default), which
+   is asked for a short analysis followed by a one-line JSON of integer deltas (-20 to 20) per metric. If the
+   director fails or returns nothing parsable, Gemini evaluates instead and returns an impact level
+   (`low` / `medium` / `high` / `extreme`) and direction per metric, which is converted to numeric deltas by range
+   (low 5-10, medium 15-30, high 30-50, extreme pushes the metric to the boundary). The JSON is pulled out of free-form
+   model output; the impact-level parser uses a balanced-brace scanner to find the nested object. If both providers fail, a small random impact
+   (at most ±10 per metric) is used.
+5. **State.** Metrics (economy, security, diplomacy, environment, approval, stability) start at random values
+   between 40 and 70 and are clamped to [-100, 100]. The game ends after 5 turns, or immediately when any metric
+   reaches 0. The web API then returns a plain-text "newspaper" summary of the term.
+
+The server counts which provider answered each call (`AIUsageStats`: Theta or Gemini for advisors and director)
+and exposes the counts at `/api/stats`.
+
+## The framework
 
 ```go
-// Unity C# example (via CGO or HTTP bridge)
-public class NPCController : MonoBehaviour {
-    private EmergentEngine engine;
-    
-    void Start() {
-        engine = new EmergentEngine("your_api_key");
-        npc = engine.CreateNPC("village_guard");
-    }
-}
+engine, _ := framework.NewEngine(&framework.Config{ThetaAPIKey: key, EnableLogging: true})
+defer engine.Close()
+
+guard := engine.NewNPC("village_guard",
+    framework.WithPersonality("Stern but fair"),
+    framework.WithBackground("Former soldier"),
+    framework.WithRelationship("mayor", "reports_to"),
+)
+resp, err := guard.GenerateDialogue(ctx, &framework.DialogueRequest{
+    PlayerMessage: "Any work around here?",
+    Context:       &framework.GameContext{Location: "village_entrance", TimeOfDay: "morning"},
+})
 ```
 
-```go
-// Pure Go game integration
-type GameWorld struct {
-    engine *framework.Engine
-    npcs   map[string]*framework.NPC
-}
+| Component | What it does |
+|---|---|
+| `Engine` | holds the Theta client and an optional Redis client; `Health()` and `Metrics()` (request/failure counters) |
+| `NPC` | dialogue from personality, background, relationships and memory; streaming variant; optional voice and vision calls; memory in-process with optional Redis persistence (24 h TTL) |
+| `Director` | `ProcessEvent` (strategic reasoning over a game event), `AnalyzePlayerBehavior`, `GenerateEvent`, `AdjustDifficulty` |
+| `Narrative` | quest and story-event generation, generated choices, lore entries, quest progress tracking |
+| `AssetGenerator` | image, video, texture and concept-art requests with a SHA-1-keyed cache, TTL and oldest-first eviction |
 
-func (gw *GameWorld) HandlePlayerInteraction(npcID, message string) {
-    npc := gw.npcs[npcID]
-    response, _ := npc.GenerateDialogue(ctx, &framework.DialogueRequest{
-        PlayerMessage: message,
-        Context:       gw.GetGameContext(),
-    })
-    
-    gw.DisplayDialogue(npc.ID, response.Message)
-    if len(response.AudioData) > 0 {
-        gw.PlayAudio(response.AudioData)
-    }
-}
-```a **Go framework** that game developers import directly into their projects. No microservices, no containers, no network complexity - just a clean API that brings AI superpowers to your game.
+All components use functional options (`WithPersonality`, `WithStrategicFocus`, `WithGenre`, `WithCache`, ...)
+and guard their state with `sync.RWMutex`.
 
-### Core Components
+`internal/theta_client` is the HTTP layer. Generic requests go through a channel-based token-bucket rate limiter
+(8 requests/s by default) and retry with linear backoff on 5xx and 429. DeepSeek R1 and Llama 3.1 70B are routed
+to their specific EdgeCloud endpoints, and their responses are parsed whether they come back as an SSE stream or
+plain JSON.
 
-- **🤖 Intelligent NPCs**: Context-aware dialogue, memory, personality, and voice synthesis
-- **🎭 AI Game Director**: Strategic decision making, difficulty scaling, and player behavior analysis  
-- **📚 Dynamic Narratives**: Procedural quest generation, branching storylines, and lore management
-- **🎨 Asset Generation**: On-demand creation of images, videos, textures, and concept art using FLUX.1-schnell and Stable Diffusion Video
+**Scope note.** The game only uses `Engine` and `Director` (advisors call the Llama client in `game/internal`
+directly). The image, video, voice and vision wrappers in the framework post to generic `/v1/inference/...` paths
+under the configured base URL and were not exercised by the game. Treat them as an API sketch.
 
-## 🏗️ Architecture
+## Build & run
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Your Game Process                        │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌────────┐ │
-│  │    NPCs     │ │  Director   │ │  Narrative  │ │ Assets │ │
-│  │             │ │             │ │             │ │        │ │
-│  └─────────────┘ └─────────────┘ └─────────────┘ └────────┘ │
-│                           │                                 │
-│                    ┌─────────────┐                         │
-│                    │  Framework  │                         │
-│                    │   Engine    │                         │
-│                    └─────────────┘                         │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                   ┌─────────────────┐
-                   │  Theta          │
-                   │  EdgeCloud      │
-                   │  (AI Models)    │
-                   └─────────────────┘
-```
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Go 1.21 or later
-- Theta EdgeCloud API key (sign up at [Theta EdgeCloud](https://www.thetaedgecloud.com/))
-
-### Installation
+Requires Go 1.25+ and Node.js for the frontend.
 
 ```bash
-go get github.com/emergent-world-engine/backend
+cp game/.env.example game/.env    # THETA_API_KEY / ON_DEMAND_API_ACCESS_TOKEN, GOOGLE_AI_API_KEY
+
+# Game server (web mode, port 8080)
+make game-dev                     # = cd game && go run . web 8080
+# or build a binary to bin/presidential-sim
+make game-build && ./bin/presidential-sim web 8080
+
+# Terminal mode
+cd game && go run .
+
+# React frontend (talks to http://localhost:8080/api)
+cd frontend && npm install && npm start    # http://localhost:3000
 ```
 
-### Basic Usage
+`THETA_API_KEY` is required to start the game. When a provider call fails (or its key is missing), the game
+falls through to the next fallback: canned advisor lines, random impacts, no image.
 
-```go
-package main
-
-import (
-    "context"
-    "fmt"
-    "github.com/emergent-world-engine/backend/pkg/framework"
-)
-
-func main() {
-    // Initialize the framework
-    config := &framework.Config{
-        ThetaAPIKey: "your_theta_api_key_here",
-    }
-    
-    engine, err := framework.NewEngine(config)
-    if err != nil {
-        panic(err)
-    }
-    defer engine.Close()
-    
-    // Create an intelligent NPC
-    guard := engine.NewNPC("village_guard",
-        framework.WithPersonality("Friendly but cautious"),
-        framework.WithVoice(true),
-    )
-    
-    // Generate contextual dialogue
-    ctx := context.Background()
-    response, _ := guard.GenerateDialogue(ctx, &framework.DialogueRequest{
-        PlayerMessage: "Hello, what's happening in town?",
-        Context: &framework.GameContext{
-            Location: "village_square",
-            TimeOfDay: "morning",
-        },
-    })
-    
-    fmt.Println("Guard:", response.Message)
-}
-```
-
-### Advanced Configuration
-
-```go
-// Full configuration example
-config := &framework.Config{
-    ThetaAPIKey:   "your_api_key",
-    ThetaEndpoint: "https://api.thetaedgecloud.com", // optional
-    RedisURL:      "redis://localhost:6379",          // optional for persistence
-    RedisPassword: "",                               // optional
-    EnableRedis:   true,                              // enables advanced features
-    EnableLogging: true,
-}
-
-engine, err := framework.NewEngine(config)
-```
-
-### Optional Redis Integration
-
-For advanced features like persistent NPC memory and cross-session state:
+Framework targets:
 
 ```bash
-# Install Redis (optional)
-brew install redis
-redis-server
+make test           # go test ./... (framework unit tests, no network)
+make run-example    # examples/simple: NPC, director, narrative, asset calls
+go run examples/video_generation/main.go
 ```
 
-Then enable in config:
-```go
-config.EnableRedis = true
-config.RedisURL = "redis://localhost:6379"
-```
+To use the framework from another module, add a `replace github.com/emergent-world-engine/backend => <path>`
+directive, as `game/go.mod` does (the module path is not a published repository).
 
-## 🎮 Framework Components
+## API
 
-### Intelligent NPCs
-Create AI-driven characters with personality, memory, and contextual awareness.
+The game server exposes `POST /api/start`, `GET /api/state`, `POST /api/new-round`, `POST /api/evaluate-choice`,
+`GET /api/stats` and `POST /api/generate-image`, plus two legacy endpoints. Request and response shapes are in
+[game/API.md](game/API.md).
 
-**Key Features:**
-- Contextual dialogue generation using DeepSeek R1
-- Persistent memory and relationship tracking
-- Environmental perception with Grounding Dino
-- Voice synthesis with Kokoro 82M
-- Personality-driven responses
-
-**Usage:**
-```go
-npc := engine.NewNPC("shopkeeper",
-    framework.WithPersonality("Greedy but helpful merchant"),
-    framework.WithBackground("Former adventurer turned trader"),
-    framework.WithVoice(true),
-)
-```
-
-### AI Game Director
-Intelligent game orchestration and player experience optimization.
-
-**Key Features:**
-- Strategic decision making using DeepSeek R1
-- Player behavior analysis and adaptation
-- Dynamic difficulty scaling
-- Event generation and orchestration
-
-**Usage:**
-```go
-director := engine.NewDirector(
-    framework.WithStrategicFocus("narrative"),
-    framework.WithPlayerAnalysis(true),
-)
-```
-
-### Dynamic Narrative System
-Procedural storytelling and quest generation.
-
-**Key Features:**
-- AI-powered quest generation
-- Branching storylines with player choice
-- Lore consistency validation
-- Dynamic story events
-
-**Usage:**
-```go
-narrative := engine.NewNarrative(
-    framework.WithGenre("fantasy"),
-    framework.WithPlayerChoice(true),
-)
-```
-
-### Asset Generation
-On-demand creation of game assets using AI.
-
-**Key Features:**
-- Image generation with FLUX.1-schnell
-- Video generation with Stable Diffusion Video
-- Texture creation for 3D models
-- Concept art generation
-- Asset caching and management
-
-**Usage:**
-```go
-assets := engine.NewAssetGenerator(
-    framework.WithQuality("high"),
-    framework.WithCache(true, 24*time.Hour),
-)
-```
-
-## 🔧 Framework Usage Examples
-
-### Creating Intelligent NPCs
-
-```go
-// Create an NPC with personality and voice
-innkeeper := engine.NewNPC("tavern_keeper",
-    framework.WithPersonality("Warm, gossipy, knows everyone's business"),
-    framework.WithBackground("Long-time tavern owner, former bard"),
-    framework.WithVoice(true),
-    framework.WithRelationship("mayor", "old_friend"),
-)
-
-// Generate contextual dialogue
-response, err := innkeeper.GenerateDialogue(ctx, &framework.DialogueRequest{
-    PlayerMessage: "Any interesting news around town?",
-    Context: &framework.GameContext{
-        Location:    "cozy_tavern",
-        TimeOfDay:   "evening",
-        NearbyNPCs:  []string{"drunk_patron", "traveling_merchant"},
-        Environment: "warm firelight, smell of ale and stew",
-    },
-})
-
-fmt.Println("Innkeeper:", response.Message)
-if len(response.AudioData) > 0 {
-    // Play voice audio
-    playAudio(response.AudioData)
-}
-```
-
-### Generating Game Assets
-
-```go
-// Generate weapon artwork
-weaponArt, err := assetGen.GenerateImage(ctx, &framework.ImageRequest{
-    Prompt: "Legendary flaming sword with intricate engravings",
-    Style:  "fantasy game art",
-    Width:  512,
-    Height: 512,
-})
-
-// Generate tileable stone texture  
-stoneTexture, err := assetGen.GenerateTexture(ctx, &framework.TextureRequest{
-    BasePrompt:  "Ancient castle stone wall",
-    TextureType: "diffuse",
-    Material:    "stone",
-    Resolution:  1024,
-    Tileable:    true,
-})
-
-fmt.Printf("Generated assets: %s, %s\n", weaponArt.ID, stoneTexture.ID)
-```
-
-### Dynamic Quest Generation
-
-```go
-// Generate contextual quests
-quest, err := narrative.GenerateQuest(ctx, &framework.GameContext{
-    Location:     "haunted_forest",
-    TimeOfDay:    "midnight",
-    NearbyItems:  []string{"mysterious_artifact"},
-    PlayerStats:  map[string]interface{}{"level": 10, "class": "ranger"},
-})
-
-fmt.Printf("New Quest: %s\n", quest.Title)
-fmt.Printf("Description: %s\n", quest.Description)
-for _, obj := range quest.Objectives {
-    fmt.Printf("- %s\n", obj.Description)
-}
-```
-
-## 🔌 AI Model Integration
-
-The framework seamlessly integrates with multiple Theta EdgeCloud AI models:
-
-| Model | Purpose | Framework Component |
-|-------|---------|---------|
-| DeepSeek R1 | Strategic reasoning & planning | Director, Narrative |
-| DeepSeek R1 | NPC dialogue & interactions | NPCs |
-| Kokoro 82M | Text-to-speech synthesis | NPCs (with voice) |
-| Grounding Dino | Visual perception & analysis | NPCs (with vision) |
-| FLUX.1-schnell | Image & texture generation | AssetGenerator |
-| Stable Diffusion Video | Video generation | AssetGenerator |
-
-### Model Selection
-
-```go
-// Use specific models for different components
-npc := engine.NewNPC("wizard",
-    framework.WithDialogueModel("deepseek_r1"),  // Use DeepSeek R1 for complex NPCs
-    framework.WithVoiceModel("kokoro-82m"),
-)
-
-// Configure asset generation models
-assets := engine.NewAssetGenerator(
-    framework.WithImageModel("flux.1-schnell"),
-    framework.WithVideoModel("stable-diffusion-video"),
-    framework.WithQuality("high"),
-)
-```
-
-## 📊 Monitoring & Observability
-
-The engine includes comprehensive monitoring:
-
-- **Prometheus**: Metrics collection (http://localhost:9090)
-- **Grafana**: Visualization dashboards (http://localhost:3000)
-- **Redis Commander**: Redis data inspection (http://localhost:8081)
-
-Default Grafana credentials: `admin/admin`
-
-## 🛠️ Framework Development
-
-### Project Structure
+## Project structure
 
 ```
-emergent-world-engine/
-├── pkg/framework/          # Core framework package
-│   ├── framework.go        # Main engine
-│   ├── npc.go              # NPC system
-│   ├── director.go         # AI game director
-│   ├── narrative.go        # Storytelling system
-│   └── assets.go           # Asset generation
-├── internal/               # Internal packages
-│   ├── theta_client/       # Theta EdgeCloud client
-│   └── redis_client/       # Optional Redis client
-├── examples/               # Usage examples
-│   └── simple/             # Basic framework demo
-└── go.mod                  # Go module definition
+pkg/framework/          Engine, NPC, Director, Narrative, AssetGenerator, tests
+internal/theta_client/  Theta EdgeCloud HTTP client (rate limit, retries, SSE parsing)
+internal/redis_client/  go-redis wrapper with NPC/quest/world-state helpers
+examples/               framework usage examples
+game/                   Presidential Simulator (separate Go module)
+  engine.go             advisors, topic seeds, event generation, image prompt
+  orchestrator.go       turn loop, advisor extraction, director evaluation, fallbacks
+  server.go             HTTP API and end-of-game summary
+  internal/             Llama, Gemini and FLUX/Gemini image clients
+frontend/               React app (Create React App, styled-components)
 ```
 
-### Building and Testing
+`game/chat.html` (an AgentStage logo concept, served at `/` by the Go server) and `game/index.html` (a static
+newspaper mock-up) are design drafts. The game UI is the React app.
 
-```bash
-# Run the example
-go run examples/simple/main.go
+## Team & credits
 
-# Run tests
-go test ./pkg/framework/
+Forked from [mechitall/AgentStage](https://github.com/mechitall/AgentStage).
 
-# Build your game with the framework
-go build -o mygame ./cmd/mygame/
-```
+- **mechitall** (the upstream's initial commit, git author `neo`): initial Emergent World Engine framework (`pkg/framework`, `internal/`,
+  `examples/simple`).
+- **Nam Lap Vu** ([42navalkrinzhaslattt](https://github.com/42navalkrinzhaslattt)): framework hardening (DeepSeek R1
+  and Llama endpoint routing, rate limiter and retries in the Theta client, SSE parsing and streaming dialogue,
+  mutex-guarded state, asset cache eviction, logger, video-generation types); the whole Presidential Simulator
+  in `game/` (turn engine, orchestrator, REST API, Llama/Gemini/FLUX clients and fallbacks, impact-level
+  parsing, API docs); frontend changes for inline event images and advisor messages.
+- **madvil2**: React frontend (`frontend/`).
 
-### Extending the Framework
-
-```go
-// Add custom NPC behaviors
-type CustomNPC struct {
-    *framework.NPC
-    customBehavior string
-}
-
-func (c *CustomNPC) SpecialAction(ctx context.Context) error {
-    // Your custom NPC logic
-    return nil
-}
-
-// Extend with your own components
-type GameSpecificComponent struct {
-    engine *framework.Engine
-}
-```
-
-## 🔒 Security & Best Practices
-
-### API Key Security
-```go
-// ✅ Good: Use environment variables
-config := &framework.Config{
-    ThetaAPIKey: os.Getenv("THETA_API_KEY"),
-}
-
-// ❌ Bad: Hard-coded API keys
-config := &framework.Config{
-    ThetaAPIKey: "your_key_here", // Never do this!
-}
-```
-
-### Performance Optimization
-
-```go
-// Configure timeouts and limits
-config := &framework.Config{
-    ThetaAPIKey: os.Getenv("THETA_API_KEY"),
-    // Add timeout configuration
-}
-
-// Use caching for assets
-assets := engine.NewAssetGenerator(
-    framework.WithCache(true, 24*time.Hour),
-    framework.WithQuality("standard"), // Balance quality vs speed
-)
-
-// Batch operations when possible
-for _, npc := range npcs {
-    go func(n *framework.NPC) {
-        // Process NPCs concurrently
-        n.GenerateDialogue(ctx, req)
-    }(npc)
-}
-```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Implement changes with tests
-4. Submit a pull request
-
-## 📝 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🔗 Links
-
-- [Theta EdgeCloud Documentation](https://docs.thetaedgecloud.com/)
-- [gRPC Go Documentation](https://grpc.io/docs/languages/go/)
-- [Redis Documentation](https://redis.io/documentation)
-
-## 📧 Support
-
-For questions and support, please open an issue on the repository or contact the development team.
-
----
-
----
-
-## 🎮 Ready to Build the Future?
-
-```bash
-# Get started in 30 seconds
-go get github.com/emergent-world-engine/backend
-```
-
-Transform your game with AI superpowers:
-- **🤖 NPCs that remember and respond intelligently**
-- **📚 Stories that adapt to player choices**  
-- **🎨 Assets generated on-demand**
-- **🎭 Game balance that evolves with players**
-
-**Built with ❤️ for the next generation of AI-driven gaming**
+License: MIT (see [LICENSE](LICENSE)).

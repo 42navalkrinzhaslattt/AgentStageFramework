@@ -12,7 +12,7 @@ Status codes:
 
 Environment prerequisites (server side):
 - Text models: ON_DEMAND_API_ACCESS_TOKEN (or THETA_API_KEY), GOOGLE_AI_API_KEY (fallback)
-- Image models: ON_DEMAND_API_ACCESS_TOKEN (Flux). Fallback to Google Gemini image generation (gemini-2.0-flash-preview-image-generation) uses GOOGLE_AI_API_KEY or GEMINI_API_KEY.
+- Image models: ON_DEMAND_API_ACCESS_TOKEN (Flux). Fallback to Google Gemini image generation (default model gemini-2.5-flash-image-preview, override with GOOGLE_GEMINI_IMAGE_MODEL) uses GOOGLE_AI_API_KEY or GEMINI_API_KEY.
 
 ---
 
